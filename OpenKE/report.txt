@@ -1,0 +1,63 @@
+TensorFlow 2.0 Upgrade Script
+-----------------------------
+Converted 1 files
+Detected 11 issues that require attention
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+File: models/TransE.py
+--------------------------------------------------------------------------------
+models/TransE.py:21:24: WARNING: tf.get_variable requires manual check. tf.get_variable returns ResourceVariables by default in 2.0, which have well-defined semantics and are stricter about shapes. You can disable this behavior by passing use_resource=False, or by calling tf.compat.v1.disable_resource_variables().
+models/TransE.py:22:24: WARNING: tf.get_variable requires manual check. tf.get_variable returns ResourceVariables by default in 2.0, which have well-defined semantics and are stricter about shapes. You can disable this behavior by passing use_resource=False, or by calling tf.compat.v1.disable_resource_variables().
+models/TransE.py:35:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:36:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:37:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:38:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:39:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:40:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:55:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:56:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+models/TransE.py:57:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+================================================================================
+Detailed log follows:
+
+================================================================================
+--------------------------------------------------------------------------------
+Processing file 'models/TransE.py'
+ outputting to 'models/TransE.py'
+--------------------------------------------------------------------------------
+
+21:24: WARNING: tf.get_variable requires manual check. tf.get_variable returns ResourceVariables by default in 2.0, which have well-defined semantics and are stricter about shapes. You can disable this behavior by passing use_resource=False, or by calling tf.compat.v1.disable_resource_variables().
+21:24: INFO: Renamed 'tf.get_variable' to 'tf.compat.v1.get_variable'
+21:126: INFO: Changing tf.contrib.layers xavier initializer to a tf.compat.v1.keras.initializers.VarianceScaling and converting arguments.
+
+22:24: WARNING: tf.get_variable requires manual check. tf.get_variable returns ResourceVariables by default in 2.0, which have well-defined semantics and are stricter about shapes. You can disable this behavior by passing use_resource=False, or by calling tf.compat.v1.disable_resource_variables().
+22:24: INFO: Renamed 'tf.get_variable' to 'tf.compat.v1.get_variable'
+22:126: INFO: Changing tf.contrib.layers xavier initializer to a tf.compat.v1.keras.initializers.VarianceScaling and converting arguments.
+
+35:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+35:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+36:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+36:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+37:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+37:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+38:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+38:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+39:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+39:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+40:8: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+40:8: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+48:13: INFO: Added keywords to args of function 'tf.reduce_sum'
+48:13: INFO: Renamed keyword argument for tf.reduce_sum from keep_dims to keepdims
+49:13: INFO: Added keywords to args of function 'tf.reduce_sum'
+49:13: INFO: Renamed keyword argument for tf.reduce_sum from keep_dims to keepdims
+51:14: INFO: Added keywords to args of function 'tf.reduce_mean'
+55:16: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+55:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+56:16: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+56:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+57:16: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+57:16: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+58:17: INFO: Added keywords to args of function 'tf.reduce_mean'
+58:17: INFO: Renamed keyword argument for tf.reduce_mean from keep_dims to keepdims
+--------------------------------------------------------------------------------
+
