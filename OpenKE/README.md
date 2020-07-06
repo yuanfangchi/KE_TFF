@@ -1,4 +1,4 @@
-
+This version of OpenKE is modified and verified to run with Python 3.7 and Tensorflow 2.0. Below is the original README of OpenKE.
 
 
 # OpenKE
