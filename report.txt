@@ -1,0 +1,56 @@
+TensorFlow 2.0 Upgrade Script
+-----------------------------
+Converted 1 files
+Detected 2 issues that require attention
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+File: ./code/model/trainer.py
+--------------------------------------------------------------------------------
+./code/model/trainer.py:120:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+./code/model/trainer.py:476:33: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+================================================================================
+Detailed log follows:
+
+================================================================================
+--------------------------------------------------------------------------------
+Processing file './code/model/trainer.py'
+ outputting to './code/model/trainer_2.py'
+--------------------------------------------------------------------------------
+
+45:25: INFO: Renamed 'tf.train.AdamOptimizer' to 'tf.compat.v1.train.AdamOptimizer'
+56:34: INFO: Added keywords to args of function 'tf.nn.moments'
+59:23: INFO: Renamed 'tf.div' to 'tf.compat.v1.div'
+64:21: INFO: Added keywords to args of function 'tf.reduce_mean'
+70:27: INFO: Added keywords to args of function 'tf.reduce_mean'
+70:42: INFO: Added keywords to args of function 'tf.reduce_sum'
+79:35: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+80:30: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+81:25: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+83:29: INFO: tf.train.exponential_decay requires manual check. To use learning rate decay schedules with TensorFlow 2.0, switch to the schedules in `tf.keras.optimizers.schedules`.
+
+83:29: INFO: Renamed 'tf.train.exponential_decay' to 'tf.compat.v1.train.exponential_decay'
+88:37: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+94:38: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+96:37: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+98:35: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+99:29: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+118:26: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+119:29: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+120:31: INFO: Added keywords to args of function 'tf.nn.embedding_lookup'
+120:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+123:30: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+124:29: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+126:32: INFO: Renamed 'tf.placeholder' to 'tf.compat.v1.placeholder'
+130:13: INFO: Renamed 'tf.variable_scope' to 'tf.compat.v1.variable_scope'
+138:27: INFO: Renamed 'tf.train.Saver' to 'tf.compat.v1.train.Saver'
+142:19: INFO: Renamed 'tf.global_variables_initializer' to 'tf.compat.v1.global_variables_initializer'
+159:29: INFO: Added keywords to args of function 'tf.reduce_mean'
+160:16: INFO: Renamed 'tf.trainable_variables' to 'tf.compat.v1.trainable_variables'
+161:16: INFO: Added keywords to args of function 'tf.gradients'
+476:33: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+543:13: INFO: Renamed 'tf.ConfigProto' to 'tf.compat.v1.ConfigProto'
+551:13: INFO: Renamed 'tf.Session' to 'tf.compat.v1.Session'
+560:8: INFO: Renamed 'tf.reset_default_graph' to 'tf.compat.v1.reset_default_graph'
+571:9: INFO: Renamed 'tf.Session' to 'tf.compat.v1.Session'
+--------------------------------------------------------------------------------
+
