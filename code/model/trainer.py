@@ -17,10 +17,12 @@ import resource
 import sys
 from code.model.baseline import ReactiveBaseline
 from code.model.nell_eval import nell_eval
-from scipy.misc import logsumexp as lse
+from scipy.special import logsumexp as lse
 
 logger = logging.getLogger()
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+tf.compat.v1.disable_eager_execution()
 
 
 class Trainer(object):
@@ -124,8 +126,6 @@ class Trainer(object):
         self.next_entities = tf.compat.v1.placeholder(tf.int32, shape=[None, self.max_num_actions])
 
         self.current_entities = tf.compat.v1.placeholder(tf.int32, shape=[None,])
-
-
 
         with tf.compat.v1.variable_scope("policy_steps_unroll") as scope:
             scope.reuse_variables()

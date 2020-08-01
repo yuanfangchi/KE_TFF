@@ -3,9 +3,10 @@ import tensorflow as tf
 import tensorflow_federated as tff
 
 
-class Agent(tff.learning.Model):
+class Agent(tf.keras.Model):
 
     def __init__(self, params):
+        super(Agent, self).__init__()
 
         self.action_vocab_size = len(params['relation_vocab'])
         self.entity_vocab_size = len(params['entity_vocab'])
@@ -34,7 +35,7 @@ class Agent(tff.learning.Model):
         else:
             self.m = 2
 
-        with tf.compat.v1.variable_scope("action_lookup_table"):
+        with tf.compat.v1.variable_scope("action_lookup_table", reuse=tf.compat.v1.AUTO_REUSE):
             self.action_embedding_placeholder = tf.compat.v1.placeholder(tf.float32,
                                                                [self.action_vocab_size, 2 * self.embedding_size])
 
@@ -45,7 +46,7 @@ class Agent(tff.learning.Model):
                                                          trainable=self.train_relations)
             self.relation_embedding_init = self.relation_lookup_table.assign(self.action_embedding_placeholder)
 
-        with tf.compat.v1.variable_scope("entity_lookup_table"):
+        with tf.compat.v1.variable_scope("entity_lookup_table", reuse=tf.compat.v1.AUTO_REUSE):
             self.entity_embedding_placeholder = tf.compat.v1.placeholder(tf.float32,
                                                                [self.entity_vocab_size, 2 * self.embedding_size])
             self.entity_lookup_table = tf.compat.v1.get_variable("entity_lookup_table",
@@ -55,26 +56,25 @@ class Agent(tff.learning.Model):
                                                        trainable=self.train_entities)
             self.entity_embedding_init = self.entity_lookup_table.assign(self.entity_embedding_placeholder)
 
-        with tf.compat.v1.variable_scope("policy_step"):
+        with tf.compat.v1.variable_scope("policy_step", reuse=tf.compat.v1.AUTO_REUSE):
             cells = []
             for _ in range(self.LSTM_Layers):
                 cells.append(tf.compat.v1.nn.rnn_cell.LSTMCell(self.m * self.hidden_size, use_peepholes=True, state_is_tuple=True))
             self.policy_step = tf.compat.v1.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
 
-    @tf.function
     def get_mem_shape(self):
         return (self.LSTM_Layers, 2, None, self.m * self.hidden_size)
 
     @tf.function
     def policy_MLP(self, state):
-        with tf.compat.v1.variable_scope("MLP_for_policy"):
+        with tf.compat.v1.variable_scope("MLP_for_policy", reuse=tf.compat.v1.AUTO_REUSE):
             hidden = tf.compat.v1.layers.dense(state, 4 * self.hidden_size, activation=tf.nn.relu)
             output = tf.compat.v1.layers.dense(hidden, self.m * self.embedding_size, activation=tf.nn.relu)
         return output
 
     @tf.function
     def action_encoder(self, next_relations, next_entities):
-        with tf.compat.v1.variable_scope("lookup_table_edge_encoder"):
+        with tf.compat.v1.variable_scope("lookup_table_edge_encoder", reuse=tf.compat.v1.AUTO_REUSE):
             relation_embedding = tf.nn.embedding_lookup(params=self.relation_lookup_table, ids=next_relations)
             entity_embedding = tf.nn.embedding_lookup(params=self.entity_lookup_table, ids=next_entities)
             if self.use_entity_embeddings:
@@ -141,7 +141,7 @@ class Agent(tff.learning.Model):
         all_logits = []  # list of actions each [B,]
         action_idx = []
 
-        with tf.compat.v1.variable_scope("policy_steps_unroll") as scope:
+        with tf.compat.v1.variable_scope("policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
             for t in range(T):
                 if t > 0:
                     scope.reuse_variables()
