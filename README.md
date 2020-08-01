@@ -14,7 +14,7 @@ MINERVA is a RL agent which answers queries in a knowledge graph of entities and
 ## Requirements
 To install the various python dependencies (including tensorflow)
 ```
-pip install -r requirements.txt
+pip3 install -r requirements.txt
 ```
 
 ## Training
