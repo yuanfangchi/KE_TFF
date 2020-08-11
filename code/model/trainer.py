@@ -544,30 +544,37 @@ if __name__ == '__main__':
     config.gpu_options.allow_growth = False
     config.log_device_placement = False
 
-
-    #Training
+    # Training
+    # 不直接读取模型
     if not options['load_model']:
         trainer = Trainer(options)
         with tf.compat.v1.Session(config=config) as sess:
+            # 初始化训练模型
             sess.run(trainer.initialize())
             trainer.initialize_pretrained_embeddings(sess=sess)
 
+            # 训练
             trainer.train(sess)
             save_path = trainer.save_path
             path_logger_file = trainer.path_logger_file
             output_dir = trainer.output_dir
 
         tf.compat.v1.reset_default_graph()
-    #Testing on test with best model
+    # 直接读取模型
+    # Testing on test with best model
     else:
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
 
+
     trainer = Trainer(options)
+    # 直接读取模型
     if options['load_model']:
         save_path = options['model_load_dir']
         path_logger_file = trainer.path_logger_file
         output_dir = trainer.output_dir
+
+    # Testing
     with tf.compat.v1.Session(config=config) as sess:
         trainer.initialize(restore=save_path, sess=sess)
 
