@@ -1,23 +1,25 @@
 from __future__ import absolute_import
 from __future__ import division
-from tqdm import tqdm
-import json
-import time
-import os
-import logging
-import numpy as np
-import tensorflow as tf
-from code.model.agent import Agent
-from code.options import read_options
-from code.model.environment import env
+
 import codecs
-from collections import defaultdict
 import gc
+import json
+import logging
+import os
 import resource
 import sys
-from code.model.baseline import ReactiveBaseline
-from code.model.nell_eval import nell_eval
+import time
+from collections import defaultdict
+
+import numpy as np
+import tensorflow as tf
 from scipy.special import logsumexp as lse
+from tqdm import tqdm
+
+from code.model.agent import Agent
+from code.model.baseline import ReactiveBaseline
+from code.model.environment import env
+from code.options import read_options
 
 logger = logging.getLogger()
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
@@ -46,7 +48,6 @@ class Trainer(object):
         self.baseline = ReactiveBaseline(l=self.Lambda)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
 
-
     def calc_reinforce_loss(self):
         loss = tf.stack(self.per_example_loss, axis=1)  # [B, T]
 
@@ -63,13 +64,15 @@ class Trainer(object):
         loss = tf.multiply(loss, final_reward)  # [B, T]
         self.loss_before_reg = loss
 
-        total_loss = tf.reduce_mean(input_tensor=loss) - self.decaying_beta * self.entropy_reg_loss(self.per_example_logits)  # scalar
+        total_loss = tf.reduce_mean(input_tensor=loss) - self.decaying_beta * self.entropy_reg_loss(
+            self.per_example_logits)  # scalar
 
         return total_loss
 
     def entropy_reg_loss(self, all_logits):
         all_logits = tf.stack(all_logits, axis=2)  # [B, MAX_NUM_ACTIONS, T]
-        entropy_policy = - tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.multiply(tf.exp(all_logits), all_logits), axis=1))  # scalar
+        entropy_policy = - tf.reduce_mean(
+            input_tensor=tf.reduce_sum(input_tensor=tf.multiply(tf.exp(all_logits), all_logits), axis=1))  # scalar
         return entropy_policy
 
     def initialize(self, restore=None, sess=None):
@@ -83,33 +86,31 @@ class Trainer(object):
         self.range_arr = tf.compat.v1.placeholder(tf.int32, shape=[None, ])
         self.global_step = tf.Variable(0, trainable=False)
         self.decaying_beta = tf.compat.v1.train.exponential_decay(self.beta, self.global_step,
-                                                   200, 0.90, staircase=False)
+                                                                  200, 0.90, staircase=False)
         self.entity_sequence = []
 
         # to feed in the discounted reward tensor
         self.cum_discounted_reward = tf.compat.v1.placeholder(tf.float32, [None, self.path_length],
-                                                    name="cumulative_discounted_reward")
-
-
+                                                              name="cumulative_discounted_reward")
 
         for t in range(self.path_length):
             next_possible_relations = tf.compat.v1.placeholder(tf.int32, [None, self.max_num_actions],
-                                                   name="next_relations_{}".format(t))
+                                                               name="next_relations_{}".format(t))
             next_possible_entities = tf.compat.v1.placeholder(tf.int32, [None, self.max_num_actions],
-                                                     name="next_entities_{}".format(t))
+                                                              name="next_entities_{}".format(t))
             input_label_relation = tf.compat.v1.placeholder(tf.int32, [None], name="input_label_relation_{}".format(t))
             start_entities = tf.compat.v1.placeholder(tf.int32, [None, ])
             self.input_path.append(input_label_relation)
             self.candidate_relation_sequence.append(next_possible_relations)
             self.candidate_entity_sequence.append(next_possible_entities)
             self.entity_sequence.append(start_entities)
+
         self.loss_before_reg = tf.constant(0.0)
         self.per_example_loss, self.per_example_logits, self.action_idx = self.agent(
             self.candidate_relation_sequence,
             self.candidate_entity_sequence, self.entity_sequence,
             self.input_path,
             self.query_relation, self.range_arr, self.first_state_of_test, self.path_length)
-
 
         self.loss_op = self.calc_reinforce_loss()
 
@@ -119,13 +120,14 @@ class Trainer(object):
         # Building the test graph
         self.prev_state = tf.compat.v1.placeholder(tf.float32, self.agent.get_mem_shape(), name="memory_of_agent")
         self.prev_relation = tf.compat.v1.placeholder(tf.int32, [None, ], name="previous_relation")
-        self.query_embedding = tf.nn.embedding_lookup(params=self.agent.relation_lookup_table, ids=self.query_relation)  # [B, 2D]
+        self.query_embedding = tf.nn.embedding_lookup(params=self.agent.relation_lookup_table,
+                                                      ids=self.query_relation)  # [B, 2D]
         layer_state = tf.unstack(self.prev_state, self.LSTM_layers)
         formated_state = [tf.unstack(s, 2) for s in layer_state]
         self.next_relations = tf.compat.v1.placeholder(tf.int32, shape=[None, self.max_num_actions])
         self.next_entities = tf.compat.v1.placeholder(tf.int32, shape=[None, self.max_num_actions])
 
-        self.current_entities = tf.compat.v1.placeholder(tf.int32, shape=[None,])
+        self.current_entities = tf.compat.v1.placeholder(tf.int32, shape=[None, ])
 
         with tf.compat.v1.variable_scope("policy_steps_unroll") as scope:
             scope.reuse_variables()
@@ -141,9 +143,7 @@ class Trainer(object):
         if not restore:
             return tf.compat.v1.global_variables_initializer()
         else:
-            return  self.model_saver.restore(sess, restore)
-
-
+            return self.model_saver.restore(sess, restore)
 
     def initialize_pretrained_embeddings(self, sess):
         if self.pretrained_embeddings_action != '':
@@ -165,7 +165,6 @@ class Trainer(object):
             self.dummy = tf.constant(0)
         return train_op
 
-
     def calc_cum_discounted_reward(self, rewards):
         """
         calculates the cumulative discounted reward.
@@ -185,16 +184,16 @@ class Trainer(object):
 
     def gpu_io_setup(self):
         # create fetches for partial_run_setup
-        fetches = self.per_example_loss  + self.action_idx + [self.loss_op] + self.per_example_logits + [self.dummy]
-        feeds =  [self.first_state_of_test] + self.candidate_relation_sequence+ self.candidate_entity_sequence + self.input_path + \
+        fetches = self.per_example_loss + self.action_idx + [self.loss_op] + self.per_example_logits + [self.dummy]
+        feeds = [
+                    self.first_state_of_test] + self.candidate_relation_sequence + self.candidate_entity_sequence + self.input_path + \
                 [self.query_relation] + [self.cum_discounted_reward] + [self.range_arr] + self.entity_sequence
-
 
         feed_dict = [{} for _ in range(self.path_length)]
 
         feed_dict[0][self.first_state_of_test] = False
         feed_dict[0][self.query_relation] = None
-        feed_dict[0][self.range_arr] = np.arange(self.batch_size*self.num_rollouts)
+        feed_dict[0][self.range_arr] = np.arange(self.batch_size * self.num_rollouts)
         for i in range(self.path_length):
             feed_dict[i][self.input_path[i]] = np.zeros(self.batch_size * self.num_rollouts)  # placebo
             feed_dict[i][self.candidate_relation_sequence[i]] = None
@@ -211,8 +210,9 @@ class Trainer(object):
         train_loss = 0.0
         start_time = time.time()
         self.batch_counter = 0
+        # HY 循环训练
         for episode in self.train_environment.get_episodes():
-
+            # HY 第几次训练
             self.batch_counter += 1
             h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
             feed_dict[0][self.query_relation] = episode.get_query_relation()
@@ -226,8 +226,11 @@ class Trainer(object):
                 feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
                 feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
                 feed_dict[i][self.entity_sequence[i]] = state['current_entities']
-                per_example_loss, per_example_logits, idx = sess.partial_run(h, [self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i]],
-                                                  feed_dict=feed_dict[i])
+                per_example_loss, per_example_logits, idx = sess.partial_run(h, [self.per_example_loss[i],
+                                                                                 self.per_example_logits[i],
+                                                                                 self.action_idx[i]],
+                                                                             feed_dict=feed_dict[i])
+
                 loss_before_regularization.append(per_example_loss)
                 logits.append(per_example_logits)
                 # action = np.squeeze(action, axis=1)  # [B,]
@@ -239,7 +242,6 @@ class Trainer(object):
 
             # computed cumulative discounted reward
             cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
-
 
             # backprop
             batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
@@ -263,13 +265,13 @@ class Trainer(object):
                                (num_ep_correct / self.batch_size),
                                train_loss))
 
-            if self.batch_counter%self.eval_every == 0:
+            logger.info("HY batch_counter & eval_every {}, {}, {}".format(self.batch_counter, self.eval_every, self.batch_counter % self.eval_every))
+
+            if self.batch_counter % self.eval_every == 0:
                 with open(self.output_dir + '/scores.txt', 'a') as score_file:
                     score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
                 os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
                 self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
-
-
 
                 self.test(sess, beam=True, print_paths=False)
 
@@ -279,7 +281,7 @@ class Trainer(object):
             if self.batch_counter >= self.total_iterations:
                 break
 
-    def test(self, sess, beam=False, print_paths=False, save_model = True, auc = False):
+    def test(self, sess, beam=False, print_paths=False, save_model=True, auc=False):
         batch_counter = 0
         paths = defaultdict(list)
         answers = []
@@ -304,8 +306,8 @@ class Trainer(object):
             # get initial state
             state = episode.get_state()
             mem = self.agent.get_mem_shape()
-            agent_mem = np.zeros((mem[0], mem[1], temp_batch_size*self.test_rollouts, mem[3]) ).astype('float32')
-            previous_relation = np.ones((temp_batch_size * self.test_rollouts, ), dtype='int64') * self.relation_vocab[
+            agent_mem = np.zeros((mem[0], mem[1], temp_batch_size * self.test_rollouts, mem[3])).astype('float32')
+            previous_relation = np.ones((temp_batch_size * self.test_rollouts,), dtype='int64') * self.relation_vocab[
                 'DUMMY_START_RELATION']
             feed_dict[self.range_arr] = np.arange(temp_batch_size * self.test_rollouts)
             feed_dict[self.input_path[0]] = np.zeros(temp_batch_size * self.test_rollouts)
@@ -316,7 +318,7 @@ class Trainer(object):
                 self.relation_trajectory = []
             ####################
 
-            self.log_probs = np.zeros((temp_batch_size*self.test_rollouts,)) * 1.0
+            self.log_probs = np.zeros((temp_batch_size * self.test_rollouts,)) * 1.0
 
             # for each time step
             for i in range(self.path_length):
@@ -329,9 +331,8 @@ class Trainer(object):
                 feed_dict[self.prev_relation] = previous_relation
 
                 loss, agent_mem, test_scores, test_action_idx, chosen_relation = sess.run(
-                    [ self.test_loss, self.test_state, self.test_logits, self.test_action_idx, self.chosen_relation],
+                    [self.test_loss, self.test_state, self.test_logits, self.test_action_idx, self.chosen_relation],
                     feed_dict=feed_dict)
-
 
                 if beam:
                     k = self.test_rollouts
@@ -340,20 +341,20 @@ class Trainer(object):
                         idx = np.argsort(new_scores)
                         idx = idx[:, -k:]
                         ranged_idx = np.tile([b for b in range(k)], temp_batch_size)
-                        idx = idx[np.arange(k*temp_batch_size), ranged_idx]
+                        idx = idx[np.arange(k * temp_batch_size), ranged_idx]
                     else:
                         idx = self.top_k(new_scores, k)
 
-                    y = idx//self.max_num_actions
-                    x = idx%self.max_num_actions
+                    y = idx // self.max_num_actions
+                    x = idx % self.max_num_actions
 
-                    y += np.repeat([b*k for b in range(temp_batch_size)], k)
+                    y += np.repeat([b * k for b in range(temp_batch_size)], k)
                     state['current_entities'] = state['current_entities'][y]
-                    state['next_relations'] = state['next_relations'][y,:]
+                    state['next_relations'] = state['next_relations'][y, :]
                     state['next_entities'] = state['next_entities'][y, :]
                     agent_mem = agent_mem[:, :, y, :]
                     test_action_idx = x
-                    chosen_relation = state['next_relations'][np.arange(temp_batch_size*k), x]
+                    chosen_relation = state['next_relations'][np.arange(temp_batch_size * k), x]
                     beam_probs = new_scores[y, x]
                     beam_probs = beam_probs.reshape((-1, 1))
                     if print_paths:
@@ -378,7 +379,6 @@ class Trainer(object):
                 self.entity_trajectory.append(
                     state['current_entities'])
 
-
             # ask environment for final reward
             rewards = episode.get_reward()  # [B*test_rollouts]
             reward_reshape = np.reshape(rewards, (temp_batch_size, self.test_rollouts))  # [orig_batch, test_rollouts]
@@ -395,10 +395,10 @@ class Trainer(object):
             for b in range(temp_batch_size):
                 answer_pos = None
                 seen = set()
-                pos=0
+                pos = 0
                 if self.pool == 'max':
                     for r in sorted_indx[b]:
-                        if reward_reshape[b,r] == self.positive_reward:
+                        if reward_reshape[b, r] == self.positive_reward:
                             answer_pos = pos
                             break
                         if ce[b, r] not in seen:
@@ -408,18 +408,17 @@ class Trainer(object):
                     scores = defaultdict(list)
                     answer = ''
                     for r in sorted_indx[b]:
-                        scores[ce[b,r]].append(self.log_probs[b,r])
-                        if reward_reshape[b,r] == self.positive_reward:
-                            answer = ce[b,r]
+                        scores[ce[b, r]].append(self.log_probs[b, r])
+                        if reward_reshape[b, r] == self.positive_reward:
+                            answer = ce[b, r]
                     final_scores = defaultdict(float)
                     for e in scores:
                         final_scores[e] = lse(scores[e])
                     sorted_answers = sorted(final_scores, key=final_scores.get, reverse=True)
-                    if answer in  sorted_answers:
+                    if answer in sorted_answers:
                         answer_pos = sorted_answers.index(answer)
                     else:
                         answer_pos = None
-
 
                 if answer_pos != None:
                     if answer_pos < 20:
@@ -435,7 +434,7 @@ class Trainer(object):
                 if answer_pos == None:
                     AP += 0
                 else:
-                    AP += 1.0/((answer_pos+1))
+                    AP += 1.0 / ((answer_pos + 1))
                 if print_paths:
                     qr = self.train_environment.grapher.rev_relation_vocab[self.qr[b * self.test_rollouts]]
                     start_e = self.rev_entity_vocab[episode.start_entities[b * self.test_rollouts]]
@@ -448,11 +447,14 @@ class Trainer(object):
                             rev = 1
                         else:
                             rev = -1
-                        answers.append(self.rev_entity_vocab[se[b,r]]+'\t'+ self.rev_entity_vocab[ce[b,r]]+'\t'+ str(self.log_probs[b,r])+'\n')
+                        answers.append(
+                            self.rev_entity_vocab[se[b, r]] + '\t' + self.rev_entity_vocab[ce[b, r]] + '\t' + str(
+                                self.log_probs[b, r]) + '\n')
                         paths[str(qr)].append(
                             '\t'.join([str(self.rev_entity_vocab[e[indx]]) for e in
                                        self.entity_trajectory]) + '\n' + '\t'.join(
-                                [str(self.rev_relation_vocab[re[indx]]) for re in self.relation_trajectory]) + '\n' + str(
+                                [str(self.rev_relation_vocab[re[indx]]) for re in
+                                 self.relation_trajectory]) + '\n' + str(
                                 rev) + '\n' + str(
                                 self.log_probs[b, r]) + '\n___' + '\n')
                     paths[str(qr)].append("#####################\n")
@@ -476,7 +478,7 @@ class Trainer(object):
                 self.save_path = self.model_saver.save(sess, self.model_dir + "model" + '.ckpt')
 
         if print_paths:
-            logger.info("[ printing paths at {} ]".format(self.output_dir+'/test_beam/'))
+            logger.info("[ printing paths at {} ]".format(self.output_dir + '/test_beam/'))
             for q in paths:
                 j = q.replace('/', '-')
                 with codecs.open(self.path_logger_file_ + '_' + j, 'a', 'utf-8') as pos_file:
@@ -513,6 +515,7 @@ class Trainer(object):
         idx = np.argsort(scores, axis=1)
         idx = idx[:, -k:]  # take the last k highest indices # [B , k]
         return idx.reshape((-1))
+
 
 if __name__ == '__main__':
 
@@ -566,29 +569,27 @@ if __name__ == '__main__':
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
 
-
-    trainer = Trainer(options)
-    # 直接读取模型
-    if options['load_model']:
-        save_path = options['model_load_dir']
-        path_logger_file = trainer.path_logger_file
-        output_dir = trainer.output_dir
+    # trainer = Trainer(options)
+    # # 直接读取模型
+    # if options['load_model']:
+    #     save_path = options['model_load_dir']
+    #     path_logger_file = trainer.path_logger_file
+    #     output_dir = trainer.output_dir
 
     # Testing
-    with tf.compat.v1.Session(config=config) as sess:
-        trainer.initialize(restore=save_path, sess=sess)
-
-        trainer.test_rollouts = 100
-
-        os.mkdir(path_logger_file + "/" + "test_beam")
-        trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-        with open(output_dir + '/scores.txt', 'a') as score_file:
-            score_file.write("Test (beam) scores with best model from " + save_path + "\n")
-        trainer.test_environment = trainer.test_test_environment
-        trainer.test_environment.test_rollouts = 100
-
-        trainer.test(sess, beam=True, print_paths=True, save_model=False)
-
-        if options['nell_evaluation'] == 1:
-            nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", trainer.data_input_dir+'/sort_test.pairs' )
-
+    # with tf.compat.v1.Session(config=config) as sess:
+    #     trainer.initialize(restore=save_path, sess=sess)
+    #
+    #     trainer.test_rollouts = 100
+    #
+    #     os.mkdir(path_logger_file + "/" + "test_beam")
+    #     trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
+    #     with open(output_dir + '/scores.txt', 'a') as score_file:
+    #         score_file.write("Test (beam) scores with best model from " + save_path + "\n")
+    #     trainer.test_environment = trainer.test_test_environment
+    #     trainer.test_environment.test_rollouts = 100
+    #
+    #     trainer.test(sess, beam=True, print_paths=True, save_model=False)
+    #
+    #     if options['nell_evaluation'] == 1:
+    #         nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", trainer.data_input_dir+'/sort_test.pairs' )
