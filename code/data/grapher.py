@@ -48,6 +48,7 @@ class RelationEntityGrapher:
         self.store = None
 
     def return_next_actions(self, current_entities, start_entities, query_relations, answers, all_correct_answers, last_step, rollouts):
+        # ret 第1维是entity的index，第2维是第几个action，第3维的0是目标entity，1是目标relation
         ret = self.array_store[current_entities, :, :].copy()
         for i in range(current_entities.shape[0]):
             if current_entities[i] == start_entities[i]:

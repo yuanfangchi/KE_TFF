@@ -19,6 +19,10 @@ class Episode(object):
         else:
             self.num_rollouts = test_rollouts
         self.current_hop = 0
+        # start_entities 是开始的entity
+        # query_relation 是关系
+        # end_entities 是结束的entity，可能只是其中之一
+        # all_answers 是所有结束entity的答案
         start_entities, query_relation,  end_entities, all_answers = data
         self.no_examples = start_entities.shape[0]
         self.positive_reward = positive_reward
@@ -35,6 +39,7 @@ class Episode(object):
         next_actions = self.grapher.return_next_actions(self.current_entities, self.start_entities, self.query_relation,
                                                         self.end_entities, self.all_answers, self.current_hop == self.path_len - 1,
                                                         self.num_rollouts)
+
         self.state = {}
         self.state['next_relations'] = next_actions[:, :, 1]
         self.state['next_entities'] = next_actions[:, :, 0]

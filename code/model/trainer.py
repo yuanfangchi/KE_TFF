@@ -212,10 +212,16 @@ class Trainer(object):
         self.batch_counter = 0
         # HY 循环训练
         for episode in self.train_environment.get_episodes():
+            print("HY start_entities = {}".format(episode.start_entities))
+
+            # for start_entity in episode.start_entities:
+            #     logger.info("Graph: {}".format(start_entity));
+
             # HY 第几次训练
             self.batch_counter += 1
             h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
             feed_dict[0][self.query_relation] = episode.get_query_relation()
+            print("HY feed_dict[0][self.query_relation = {}] = {}".format(self.query_relation, feed_dict[0][self.query_relation]))
 
             # get initial state
             state = episode.get_state()
@@ -223,6 +229,7 @@ class Trainer(object):
             loss_before_regularization = []
             logits = []
             for i in range(self.path_length):
+                print("HY path_step = {}".format(i))
                 feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
                 feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
                 feed_dict[i][self.entity_sequence[i]] = state['current_entities']
@@ -235,6 +242,7 @@ class Trainer(object):
                 logits.append(per_example_logits)
                 # action = np.squeeze(action, axis=1)  # [B,]
                 state = episode(idx)
+                print("HY state = {}".format(state))
             loss_before_regularization = np.stack(loss_before_regularization, axis=1)
 
             # get the final reward from the environment
@@ -264,8 +272,6 @@ class Trainer(object):
                         format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
                                (num_ep_correct / self.batch_size),
                                train_loss))
-
-            logger.info("HY batch_counter & eval_every {}, {}, {}".format(self.batch_counter, self.eval_every, self.batch_counter % self.eval_every))
 
             if self.batch_counter % self.eval_every == 0:
                 with open(self.output_dir + '/scores.txt', 'a') as score_file:
