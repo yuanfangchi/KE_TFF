@@ -8,15 +8,16 @@ import os
 
 
 class RelationEntityBatcher():
-    def __init__(self, input_dir, batch_size, entity_vocab, relation_vocab, mode = "train"):
+    def __init__(self, input_dir, batch_size, entity_vocab, relation_vocab, agent, mode = "train"):
+        self.agent = agent
         self.input_dir = input_dir
-        self.input_file = input_dir+'/{0}.txt'.format(mode)
+        #self.input_file = input_dir+'/{0}.txt'.format(mode)
         self.batch_size = batch_size
         print('Reading vocab...')
         self.entity_vocab = entity_vocab
         self.relation_vocab = relation_vocab
         self.mode = mode
-        self.create_triple_store(self.input_file)
+        self.create_triple_store(self.input_dir)
         print("batcher loaded")
 
 
@@ -27,9 +28,16 @@ class RelationEntityBatcher():
             yield self.yield_next_batch_test()
 
 
-    def create_triple_store(self, input_file):
+    def create_triple_store(self, input_dir):
         self.store_all_correct = defaultdict(set)
         self.store = []
+        if self.mode == 'train' and self.agent is not None:
+            input_file = input_dir + '/train_' + self.agent + '.txt'
+        elif self.mode == 'dev' and self.agent is not None:
+            input_file = input_dir + '/dev_' + self.agent + '.txt'
+        else:
+            input_file = input_dir+'/{0}.txt'.format(self.mode)
+
         if self.mode == 'train':
             with open(input_file) as raw_input_file:
                 csv_file = csv.reader(raw_input_file, delimiter = '\t' )

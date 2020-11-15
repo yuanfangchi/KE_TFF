@@ -6,13 +6,13 @@ import os
 from pprint import pprint
 
 
-def read_options():
+def read_options(test_name):
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_input_dir", default="", type=str)
     parser.add_argument("--input_file", default="train.txt", type=str)
     parser.add_argument("--create_vocab", default=0, type=int)
     parser.add_argument("--vocab_dir", default="", type=str)
-    parser.add_argument("--max_num_actions", default=200, type=int)
+    parser.add_argument("--max_num_actions", default=10, type=int)
     parser.add_argument("--path_length", default=3, type=int)
     parser.add_argument("--hidden_size", default=50, type=int)
     parser.add_argument("--embedding_size", default=50, type=int)
@@ -27,8 +27,8 @@ def read_options():
     parser.add_argument("--log_dir", default="./logs/", type=str)
     parser.add_argument("--log_file_name", default="reward.txt", type=str)
     parser.add_argument("--output_file", default="", type=str)
-    parser.add_argument("--num_rollouts", default=20, type=int)
-    parser.add_argument("--test_rollouts", default=100, type=int)
+    parser.add_argument("--num_rollouts", default=2, type=int)
+    parser.add_argument("--test_rollouts", default=2, type=int)
     parser.add_argument("--LSTM_layers", default=1, type=int)
     parser.add_argument("--model_dir", default='', type=str)
     parser.add_argument("--base_output_dir", default='', type=str)
@@ -58,17 +58,17 @@ def read_options():
     parsed['pretrained_embeddings_action'] = ""
     parsed['pretrained_embeddings_entity'] = ""
 
-    parsed['output_dir'] = parsed['base_output_dir'] + '/' + str(uuid.uuid4())[:4]+'_'+str(parsed['path_length'])+'_'+str(parsed['beta'])+'_'+str(parsed['test_rollouts'])+'_'+str(parsed['Lambda'])
+    parsed['output_dir'] = parsed['base_output_dir'] + '/' + test_name
 
-    parsed['model_dir'] = parsed['output_dir']+'/'+ 'model/'
+    #parsed['model_dir'] = parsed['output_dir']+'/'+ 'model/'
 
     parsed['load_model'] = (parsed['load_model'] == 1)
 
     ##Logger##
-    parsed['path_logger_file'] = parsed['output_dir']
-    parsed['log_file_name'] = parsed['output_dir'] +'/log.txt'
+    #parsed['path_logger_file'] = parsed['output_dir']
+    #parsed['log_file_name'] = parsed['output_dir'] +'/log.txt'
     os.makedirs(parsed['output_dir'])
-    os.mkdir(parsed['model_dir'])
+    #os.mkdir(parsed['model_dir'])
     with open(parsed['output_dir']+'/config.txt', 'w') as out:
         pprint(parsed, stream=out)
 

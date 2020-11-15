@@ -1,43 +1,46 @@
 from __future__ import absolute_import
 from __future__ import division
-
-import codecs
-import gc
+from tqdm import tqdm
 import json
-import logging
-import os
-import resource
-import sys
 import time
-from collections import defaultdict
-
+import os
+import logging
 import numpy as np
 import tensorflow as tf
-from scipy.special import logsumexp as lse
-from tqdm import tqdm
-
 from code.model.agent import Agent
-from code.model.baseline import ReactiveBaseline
-from code.model.environment import env
+from code.model.global_mlp import GlobalMLP
 from code.options import read_options
+from code.model.environment import env
+import codecs
+from collections import defaultdict
+import gc
+import resource
+import sys
+from code.model.baseline import ReactiveBaseline
+from code.model.nell_eval import nell_eval
+from scipy.special import logsumexp as lse
+from pprint import pprint
+from code.data.data_distributor import DataDistributor
+from code.model.blackboard import Blackboard
 
 logger = logging.getLogger()
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
 
 tf.compat.v1.disable_eager_execution()
 
 
 class Trainer(object):
-    def __init__(self, params):
+
+    def __init__(self, params, agent=None):
 
         # transfer parameters to self
         for key, val in params.items(): setattr(self, key, val);
 
         self.agent = Agent(params)
         self.save_path = None
-        self.train_environment = env(params, 'train')
-        self.dev_test_environment = env(params, 'dev')
-        self.test_test_environment = env(params, 'test')
+        self.train_environment = env(params, agent, 'train')
+        self.dev_test_environment = env(params, agent, 'dev')
+        self.test_test_environment = env(params, agent, 'test')
         self.test_environment = self.dev_test_environment
         self.rev_relation_vocab = self.train_environment.grapher.rev_relation_vocab
         self.rev_entity_vocab = self.train_environment.grapher.rev_entity_vocab
@@ -48,7 +51,24 @@ class Trainer(object):
         self.baseline = ReactiveBaseline(l=self.Lambda)
         self.optimizer = tf.compat.v1.train.AdamOptimizer(self.learning_rate)
 
+
+        if agent is not None:
+            self.output_dir = self.output_dir + '/' + agent
+        else:
+            self.output_dir = self.output_dir + '/test'
+        self.model_dir = self.output_dir + '/' + 'model/'
+        self.path_logger_file = self.output_dir
+        self.log_file_name = self.output_dir + '/log.txt'
+
+        if not os.path.isdir(self.output_dir):
+            os.mkdir(self.output_dir)
+        if not os.path.isdir(self.model_dir):
+            os.mkdir(self.model_dir)
+
+
+
     def calc_reinforce_loss(self):
+        print (self.per_example_loss)
         loss = tf.stack(self.per_example_loss, axis=1)  # [B, T]
 
         self.tf_baseline = self.baseline.get_baseline_value()
@@ -64,18 +84,17 @@ class Trainer(object):
         loss = tf.multiply(loss, final_reward)  # [B, T]
         self.loss_before_reg = loss
 
-        total_loss = tf.reduce_mean(input_tensor=loss) - self.decaying_beta * self.entropy_reg_loss(
-            self.per_example_logits)  # scalar
+        total_loss = tf.reduce_mean(input_tensor=loss) - self.decaying_beta * self.entropy_reg_loss(self.per_example_logits)  # scalar
 
         return total_loss
 
     def entropy_reg_loss(self, all_logits):
         all_logits = tf.stack(all_logits, axis=2)  # [B, MAX_NUM_ACTIONS, T]
-        entropy_policy = - tf.reduce_mean(
-            input_tensor=tf.reduce_sum(input_tensor=tf.multiply(tf.exp(all_logits), all_logits), axis=1))  # scalar
+        entropy_policy = - tf.reduce_mean(input_tensor=tf.reduce_sum(input_tensor=tf.multiply(tf.exp(all_logits), all_logits), axis=1))  # scalar
         return entropy_policy
 
-    def initialize(self, restore=None, sess=None):
+
+    def initialize(self, global_rnn, global_hidden_layer, global_output_layer, restore=None, sess=None):
 
         logger.info("Creating TF graph...")
         self.candidate_relation_sequence = []
@@ -86,30 +105,35 @@ class Trainer(object):
         self.range_arr = tf.compat.v1.placeholder(tf.int32, shape=[None, ])
         self.global_step = tf.Variable(0, trainable=False)
         self.decaying_beta = tf.compat.v1.train.exponential_decay(self.beta, self.global_step,
-                                                                  200, 0.90, staircase=False)
+                                                   200, 0.90, staircase=False)
         self.entity_sequence = []
 
         # to feed in the discounted reward tensor
         self.cum_discounted_reward = tf.compat.v1.placeholder(tf.float32, [None, self.path_length],
-                                                              name="cumulative_discounted_reward")
+                                                    name="cumulative_discounted_reward")
+
+
 
         for t in range(self.path_length):
             next_possible_relations = tf.compat.v1.placeholder(tf.int32, [None, self.max_num_actions],
-                                                               name="next_relations_{}".format(t))
+                                                   name="next_relations_{}".format(t))
             next_possible_entities = tf.compat.v1.placeholder(tf.int32, [None, self.max_num_actions],
-                                                              name="next_entities_{}".format(t))
+                                                     name="next_entities_{}".format(t))
             input_label_relation = tf.compat.v1.placeholder(tf.int32, [None], name="input_label_relation_{}".format(t))
             start_entities = tf.compat.v1.placeholder(tf.int32, [None, ])
             self.input_path.append(input_label_relation)
             self.candidate_relation_sequence.append(next_possible_relations)
             self.candidate_entity_sequence.append(next_possible_entities)
             self.entity_sequence.append(start_entities)
-
         self.loss_before_reg = tf.constant(0.0)
-        self.per_example_loss, self.per_example_logits, self.action_idx = self.agent(
+
+        #self.per_example_loss_placeholder, self.per_example_logits_placeholder = tf.compat.v1.placeholder(tf.float32,
+                                                              # [self.action_vocab_size, 2 * self.embedding_size])
+
+        self.per_example_loss, self.per_example_logits, self.action_idx, self.rnn_state, self.chosen_relations= self.agent(
             self.candidate_relation_sequence,
-            self.candidate_entity_sequence, self.entity_sequence,
-            self.input_path,
+            self.candidate_entity_sequence, self.entity_sequence, global_rnn, global_hidden_layer,
+            global_output_layer, self.input_path,
             self.query_relation, self.range_arr, self.first_state_of_test, self.path_length)
 
         self.loss_op = self.calc_reinforce_loss()
@@ -120,20 +144,20 @@ class Trainer(object):
         # Building the test graph
         self.prev_state = tf.compat.v1.placeholder(tf.float32, self.agent.get_mem_shape(), name="memory_of_agent")
         self.prev_relation = tf.compat.v1.placeholder(tf.int32, [None, ], name="previous_relation")
-        self.query_embedding = tf.nn.embedding_lookup(params=self.agent.relation_lookup_table,
-                                                      ids=self.query_relation)  # [B, 2D]
+        self.query_embedding = tf.nn.embedding_lookup(params=self.agent.relation_lookup_table, ids=self.query_relation)  # [B, 2D]
         layer_state = tf.unstack(self.prev_state, self.LSTM_layers)
         formated_state = [tf.unstack(s, 2) for s in layer_state]
         self.next_relations = tf.compat.v1.placeholder(tf.int32, shape=[None, self.max_num_actions])
         self.next_entities = tf.compat.v1.placeholder(tf.int32, shape=[None, self.max_num_actions])
 
-        self.current_entities = tf.compat.v1.placeholder(tf.int32, shape=[None, ])
+        self.current_entities = tf.compat.v1.placeholder(tf.int32, shape=[None,])
 
-        with tf.compat.v1.variable_scope("policy_steps_unroll") as scope:
+        with tf.compat.v1.variable_scope("global_policy_steps_unroll") as scope:
             scope.reuse_variables()
             self.test_loss, test_state, self.test_logits, self.test_action_idx, self.chosen_relation = self.agent.step(
                 self.next_relations, self.next_entities, formated_state, self.prev_relation, self.query_embedding,
-                self.current_entities, self.input_path[0], self.range_arr, self.first_state_of_test)
+                self.current_entities, global_rnn, global_hidden_layer,
+            global_output_layer, self.input_path[0], self.range_arr, self.first_state_of_test)
             self.test_state = tf.stack(test_state)
 
         logger.info('TF Graph creation done..')
@@ -143,7 +167,7 @@ class Trainer(object):
         if not restore:
             return tf.compat.v1.global_variables_initializer()
         else:
-            return self.model_saver.restore(sess, restore)
+            return  self.model_saver.restore(sess, restore)
 
     def initialize_pretrained_embeddings(self, sess):
         if self.pretrained_embeddings_action != '':
@@ -165,6 +189,23 @@ class Trainer(object):
             self.dummy = tf.constant(0)
         return train_op
 
+    def check_trainable_variables(self):
+        variables_names = [v.name for v in tf.compat.v1.trainable_variables()]
+        values = sess.run(variables_names)
+        for k, v in zip(variables_names, values):
+            print ("Variable: ", k)
+            print ("Shape: ", v.shape)
+            print (v)
+
+    def check_global_variables(self):
+        variables_names = [v.name for v in tf.compat.v1.global_variables()]
+        values = sess.run(variables_names)
+        for k, v in zip(variables_names, values):
+            print ("Variable: ", k)
+            print ("Shape: ", v.shape)
+            print (v)
+
+
     def calc_cum_discounted_reward(self, rewards):
         """
         calculates the cumulative discounted reward.
@@ -184,16 +225,16 @@ class Trainer(object):
 
     def gpu_io_setup(self):
         # create fetches for partial_run_setup
-        fetches = self.per_example_loss + self.action_idx + [self.loss_op] + self.per_example_logits + [self.dummy]
-        feeds = [
-                    self.first_state_of_test] + self.candidate_relation_sequence + self.candidate_entity_sequence + self.input_path + \
+        fetches = self.per_example_loss  + self.action_idx + [self.loss_op] + self.per_example_logits + [self.dummy] + self.rnn_state + self.chosen_relations
+        feeds =  [self.first_state_of_test] + self.candidate_relation_sequence+ self.candidate_entity_sequence + self.input_path + \
                 [self.query_relation] + [self.cum_discounted_reward] + [self.range_arr] + self.entity_sequence
+
 
         feed_dict = [{} for _ in range(self.path_length)]
 
         feed_dict[0][self.first_state_of_test] = False
         feed_dict[0][self.query_relation] = None
-        feed_dict[0][self.range_arr] = np.arange(self.batch_size * self.num_rollouts)
+        feed_dict[0][self.range_arr] = np.arange(self.batch_size*self.num_rollouts)
         for i in range(self.path_length):
             feed_dict[i][self.input_path[i]] = np.zeros(self.batch_size * self.num_rollouts)  # placebo
             feed_dict[i][self.candidate_relation_sequence[i]] = None
@@ -201,6 +242,7 @@ class Trainer(object):
             feed_dict[i][self.entity_sequence[i]] = None
 
         return fetches, feeds, feed_dict
+
 
     def train(self, sess):
         # import pdb
@@ -210,39 +252,51 @@ class Trainer(object):
         train_loss = 0.0
         start_time = time.time()
         self.batch_counter = 0
-        # HY 循环训练
+        episode_handovers = defaultdict(list)
         for episode in self.train_environment.get_episodes():
-            print("HY start_entities = {}".format(episode.start_entities))
 
-            # for start_entity in episode.start_entities:
-            #     logger.info("Graph: {}".format(start_entity));
-
-            # HY 第几次训练
             self.batch_counter += 1
             h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
             feed_dict[0][self.query_relation] = episode.get_query_relation()
-            print("HY feed_dict[0][self.query_relation = {}] = {}".format(self.query_relation, feed_dict[0][self.query_relation]))
 
             # get initial state
             state = episode.get_state()
+
+            # bb.notify_bb({
+            #     "entity": "sgg",
+            #     "relation": "isStudent",
+            #     "sendTo": 0
+            # })
+
             # for each time step
             loss_before_regularization = []
             logits = []
             for i in range(self.path_length):
-                print("HY path_step = {}".format(i))
+                current_entities_at_t = state['current_entities']
+
                 feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
                 feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
                 feed_dict[i][self.entity_sequence[i]] = state['current_entities']
-                per_example_loss, per_example_logits, idx = sess.partial_run(h, [self.per_example_loss[i],
-                                                                                 self.per_example_logits[i],
-                                                                                 self.action_idx[i]],
-                                                                             feed_dict=feed_dict[i])
+                per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i], self.chosen_relations[i]],
+                                                  feed_dict=feed_dict[i])
 
                 loss_before_regularization.append(per_example_loss)
                 logits.append(per_example_logits)
                 # action = np.squeeze(action, axis=1)  # [B,]
                 state = episode(idx)
-                print("HY state = {}".format(state))
+
+                current_entities_handover = []
+                for j in range(len(state['current_entities'])):
+                    if current_entities_at_t[j] != 0 and state['current_entities'][j] == 0:
+                        current_entities_handover.append(current_entities_at_t[j])
+                    else:
+                        current_entities_handover.append(0)
+                episode_handover_state = {}
+                episode_handover_state['current_entities'] = current_entities_handover
+                episode_handover_state['per_example_loss'] = per_example_loss
+                episode_handover_state['per_example_logits'] = per_example_logits
+                episode_handovers[episode].append((i, episode_handover_state))
+
             loss_before_regularization = np.stack(loss_before_regularization, axis=1)
 
             # get the final reward from the environment
@@ -250,6 +304,7 @@ class Trainer(object):
 
             # computed cumulative discounted reward
             cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
+
 
             # backprop
             batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
@@ -273,7 +328,7 @@ class Trainer(object):
                                (num_ep_correct / self.batch_size),
                                train_loss))
 
-            if self.batch_counter % self.eval_every == 0:
+            if self.batch_counter%self.eval_every == 0:
                 with open(self.output_dir + '/scores.txt', 'a') as score_file:
                     score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
                 os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
@@ -287,7 +342,94 @@ class Trainer(object):
             if self.batch_counter >= self.total_iterations:
                 break
 
-    def test(self, sess, beam=False, print_paths=False, save_model=True, auc=False):
+        return episode_handovers
+
+    def train_handover_episode(self, sess, episode_handovers):
+        fetches, feeds, feed_dict = self.gpu_io_setup()
+
+        train_loss = 0.0
+        start_time = time.time()
+
+        self.batch_counter = 0
+        for episode_handover in episode_handovers:
+            for handover_idx, episode_handover_state in episode_handovers[episode_handover]:
+
+                self.batch_counter += 1
+
+                h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
+                feed_dict[0][self.query_relation] = episode_handover.get_query_relation()
+
+                # get initial state
+                episode = self.train_environment.get_handover_episodes(episode_handover)
+                state = episode.return_next_actions(np.array(episode_handover_state['current_entities']), handover_idx)
+
+                loss_before_regularization = []
+                logits = []
+
+                if handover_idx != 0:
+                    for i in range(handover_idx):
+                        print (episode_handover_state['per_example_loss'])
+                        sess.run(self.agent.all_loss_init, {self.agent.loss_placeholder: episode_handover_state['per_example_loss']})
+
+                for i in range(handover_idx, self.path_length):
+                    feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
+                    feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
+                    feed_dict[i][self.entity_sequence[i]] = state['current_entities']
+                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i], self.chosen_relations[i]],
+                                                      feed_dict=feed_dict[i])
+
+                    loss_before_regularization.append(per_example_loss)
+                    logits.append(per_example_logits)
+                    # action = np.squeeze(action, axis=1)  # [B,]
+                    state = episode(idx)
+                loss_before_regularization = np.stack(loss_before_regularization, axis=1)
+
+                # get the final reward from the environment
+                rewards = episode.get_reward()
+
+                # computed cumulative discounted reward
+                cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
+
+                #self.check_trainable_variables()
+                #self.check_global_variables()
+
+                # backprop
+                batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
+                                                       feed_dict={self.cum_discounted_reward: cum_discounted_reward})
+
+                # print statistics
+                train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
+
+                avg_reward = np.mean(rewards)
+                # now reshape the reward to [orig_batch_size, num_rollouts], I want to calculate for how many of the
+                # entity pair, atleast one of the path get to the right answer
+                reward_reshape = np.reshape(rewards, (self.batch_size, self.num_rollouts))  # [orig_batch, num_rollouts]
+                reward_reshape = np.sum(reward_reshape, axis=1)  # [orig_batch]
+                reward_reshape = (reward_reshape > 0)
+                num_ep_correct = np.sum(reward_reshape)
+
+
+                if np.isnan(train_loss):
+                    raise ArithmeticError("Error in computing loss")
+
+                logger.info("episode handover task, batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
+                            "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".
+                            format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
+                                   (num_ep_correct / self.batch_size),
+                                   train_loss))
+
+            with open(self.output_dir + '/scores.txt', 'a') as score_file:
+                score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
+            os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
+            self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
+
+            self.test(sess, beam=True, print_paths=False)
+
+            logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+
+            gc.collect()
+
+    def test(self, sess, beam=False, print_paths=False, save_model = True, auc = False):
         batch_counter = 0
         paths = defaultdict(list)
         answers = []
@@ -312,8 +454,8 @@ class Trainer(object):
             # get initial state
             state = episode.get_state()
             mem = self.agent.get_mem_shape()
-            agent_mem = np.zeros((mem[0], mem[1], temp_batch_size * self.test_rollouts, mem[3])).astype('float32')
-            previous_relation = np.ones((temp_batch_size * self.test_rollouts,), dtype='int64') * self.relation_vocab[
+            agent_mem = np.zeros((mem[0], mem[1], temp_batch_size*self.test_rollouts, mem[3]) ).astype('float32')
+            previous_relation = np.ones((temp_batch_size * self.test_rollouts, ), dtype='int64') * self.relation_vocab[
                 'DUMMY_START_RELATION']
             feed_dict[self.range_arr] = np.arange(temp_batch_size * self.test_rollouts)
             feed_dict[self.input_path[0]] = np.zeros(temp_batch_size * self.test_rollouts)
@@ -324,7 +466,7 @@ class Trainer(object):
                 self.relation_trajectory = []
             ####################
 
-            self.log_probs = np.zeros((temp_batch_size * self.test_rollouts,)) * 1.0
+            self.log_probs = np.zeros((temp_batch_size*self.test_rollouts,)) * 1.0
 
             # for each time step
             for i in range(self.path_length):
@@ -337,8 +479,9 @@ class Trainer(object):
                 feed_dict[self.prev_relation] = previous_relation
 
                 loss, agent_mem, test_scores, test_action_idx, chosen_relation = sess.run(
-                    [self.test_loss, self.test_state, self.test_logits, self.test_action_idx, self.chosen_relation],
+                    [ self.test_loss, self.test_state, self.test_logits, self.test_action_idx, self.chosen_relation],
                     feed_dict=feed_dict)
+
 
                 if beam:
                     k = self.test_rollouts
@@ -347,20 +490,20 @@ class Trainer(object):
                         idx = np.argsort(new_scores)
                         idx = idx[:, -k:]
                         ranged_idx = np.tile([b for b in range(k)], temp_batch_size)
-                        idx = idx[np.arange(k * temp_batch_size), ranged_idx]
+                        idx = idx[np.arange(k*temp_batch_size), ranged_idx]
                     else:
                         idx = self.top_k(new_scores, k)
 
-                    y = idx // self.max_num_actions
-                    x = idx % self.max_num_actions
+                    y = idx//self.max_num_actions
+                    x = idx%self.max_num_actions
 
-                    y += np.repeat([b * k for b in range(temp_batch_size)], k)
+                    y += np.repeat([b*k for b in range(temp_batch_size)], k)
                     state['current_entities'] = state['current_entities'][y]
-                    state['next_relations'] = state['next_relations'][y, :]
+                    state['next_relations'] = state['next_relations'][y,:]
                     state['next_entities'] = state['next_entities'][y, :]
                     agent_mem = agent_mem[:, :, y, :]
                     test_action_idx = x
-                    chosen_relation = state['next_relations'][np.arange(temp_batch_size * k), x]
+                    chosen_relation = state['next_relations'][np.arange(temp_batch_size*k), x]
                     beam_probs = new_scores[y, x]
                     beam_probs = beam_probs.reshape((-1, 1))
                     if print_paths:
@@ -385,6 +528,7 @@ class Trainer(object):
                 self.entity_trajectory.append(
                     state['current_entities'])
 
+
             # ask environment for final reward
             rewards = episode.get_reward()  # [B*test_rollouts]
             reward_reshape = np.reshape(rewards, (temp_batch_size, self.test_rollouts))  # [orig_batch, test_rollouts]
@@ -401,10 +545,10 @@ class Trainer(object):
             for b in range(temp_batch_size):
                 answer_pos = None
                 seen = set()
-                pos = 0
+                pos=0
                 if self.pool == 'max':
                     for r in sorted_indx[b]:
-                        if reward_reshape[b, r] == self.positive_reward:
+                        if reward_reshape[b,r] == self.positive_reward:
                             answer_pos = pos
                             break
                         if ce[b, r] not in seen:
@@ -414,17 +558,18 @@ class Trainer(object):
                     scores = defaultdict(list)
                     answer = ''
                     for r in sorted_indx[b]:
-                        scores[ce[b, r]].append(self.log_probs[b, r])
-                        if reward_reshape[b, r] == self.positive_reward:
-                            answer = ce[b, r]
+                        scores[ce[b,r]].append(self.log_probs[b,r])
+                        if reward_reshape[b,r] == self.positive_reward:
+                            answer = ce[b,r]
                     final_scores = defaultdict(float)
                     for e in scores:
                         final_scores[e] = lse(scores[e])
                     sorted_answers = sorted(final_scores, key=final_scores.get, reverse=True)
-                    if answer in sorted_answers:
+                    if answer in  sorted_answers:
                         answer_pos = sorted_answers.index(answer)
                     else:
                         answer_pos = None
+
 
                 if answer_pos != None:
                     if answer_pos < 20:
@@ -440,7 +585,7 @@ class Trainer(object):
                 if answer_pos == None:
                     AP += 0
                 else:
-                    AP += 1.0 / ((answer_pos + 1))
+                    AP += 1.0/((answer_pos+1))
                 if print_paths:
                     qr = self.train_environment.grapher.rev_relation_vocab[self.qr[b * self.test_rollouts]]
                     start_e = self.rev_entity_vocab[episode.start_entities[b * self.test_rollouts]]
@@ -453,14 +598,11 @@ class Trainer(object):
                             rev = 1
                         else:
                             rev = -1
-                        answers.append(
-                            self.rev_entity_vocab[se[b, r]] + '\t' + self.rev_entity_vocab[ce[b, r]] + '\t' + str(
-                                self.log_probs[b, r]) + '\n')
+                        answers.append(self.rev_entity_vocab[se[b,r]]+'\t'+ self.rev_entity_vocab[ce[b,r]]+'\t'+ str(self.log_probs[b,r])+'\n')
                         paths[str(qr)].append(
                             '\t'.join([str(self.rev_entity_vocab[e[indx]]) for e in
                                        self.entity_trajectory]) + '\n' + '\t'.join(
-                                [str(self.rev_relation_vocab[re[indx]]) for re in
-                                 self.relation_trajectory]) + '\n' + str(
+                                [str(self.rev_relation_vocab[re[indx]]) for re in self.relation_trajectory]) + '\n' + str(
                                 rev) + '\n' + str(
                                 self.log_probs[b, r]) + '\n___' + '\n')
                     paths[str(qr)].append("#####################\n")
@@ -484,7 +626,7 @@ class Trainer(object):
                 self.save_path = self.model_saver.save(sess, self.model_dir + "model" + '.ckpt')
 
         if print_paths:
-            logger.info("[ printing paths at {} ]".format(self.output_dir + '/test_beam/'))
+            logger.info("[ printing paths at {} ]".format(self.output_dir+'/test_beam/'))
             for q in paths:
                 j = q.replace('/', '-')
                 with codecs.open(self.path_logger_file_ + '_' + j, 'a', 'utf-8') as pos_file:
@@ -524,9 +666,15 @@ class Trainer(object):
 
 
 if __name__ == '__main__':
-
     # read command line options
-    options = read_options()
+    options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    agent_names = ['agent_a', 'agent_b', 'agent_c']
+    #agent_names = ['agent_a']
+    #DataDistributor(options, agent_names)
+
+    #bb = Blackboard()
+    #bb.connect_to_bb()
+
     # Set logging
     logger.setLevel(logging.INFO)
     fmt = logging.Formatter('%(asctime)s: [ %(message)s ]',
@@ -556,46 +704,129 @@ if __name__ == '__main__':
     # Training
     # 不直接读取模型
     if not options['load_model']:
-        trainer = Trainer(options)
+
+        trainer = Trainer(options, agent_names[0])
+
+        global_nn = GlobalMLP(options)
+        global_rnn = global_nn.initialize_global_rnn()
+        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
         with tf.compat.v1.Session(config=config) as sess:
             # 初始化训练模型
-            sess.run(trainer.initialize())
+
+            sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
             trainer.initialize_pretrained_embeddings(sess=sess)
 
             # 训练
-            trainer.train(sess)
+            episode_handovers = trainer.train(sess)
             save_path = trainer.save_path
             path_logger_file = trainer.path_logger_file
             output_dir = trainer.output_dir
 
         tf.compat.v1.reset_default_graph()
+
+        # trainer = Trainer(options)
+        # # 直接读取模型
+        # if options['load_model']:
+        #     save_path = options['model_load_dir']
+        #     path_logger_file = trainer.path_logger_file
+        #     output_dir = trainer.output_dir
+        #
+        # global_nn = GlobalMLP(options)
+        # global_rnn = global_nn.initialize_global_rnn()
+        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+        #
+        # # Testing
+        # with tf.compat.v1.Session(config=config) as sess:
+        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+        #
+        #     trainer.test_rollouts = 100
+        #
+        #     os.mkdir(path_logger_file + "/" + "test_beam")
+        #     trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
+        #     with open(output_dir + '/scores.txt', 'a') as score_file:
+        #         score_file.write("Test (beam) scores with best model from " + save_path + "\n")
+        #     trainer.test_environment = trainer.test_test_environment
+        #     trainer.test_environment.test_rollouts = 100
+        #
+        #     trainer.test(sess, beam=True, print_paths=True, save_model=False)
+        #
+        #     if options['nell_evaluation'] == 1:
+        #         nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers",
+        #                   trainer.data_input_dir + '/sort_test.pairs')
+        #
+        # tf.compat.v1.reset_default_graph()
+
+        trainer = Trainer(options, agent_names[1])
+
+        global_nn = GlobalMLP(options)
+        global_rnn = global_nn.initialize_global_rnn()
+        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
+        with tf.compat.v1.Session(config=config) as sess:
+            trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+            trainer.initialize_pretrained_embeddings(sess=sess)
+
+            trainer.train_handover_episode(sess, episode_handovers)
+            save_path = trainer.save_path
+            path_logger_file = trainer.path_logger_file
+            output_dir = trainer.output_dir
+
+        tf.compat.v1.reset_default_graph()
+
+        # print ('YF ======= agent 3 ========= YF')
+        #
+        # trainer = Trainer(options, agent_names[2])
+        #
+        # global_nn = GlobalMLP(options)
+        # global_rnn = global_nn.initialize_global_rnn()
+        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+        #
+        # with tf.compat.v1.Session(config=config) as sess:
+        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+        #     trainer.initialize_pretrained_embeddings(sess=sess)
+        #
+        #     trainer.train_handover_episode(sess, episode_handovers)
+        #     save_path = trainer.save_path
+        #     path_logger_file = trainer.path_logger_file
+        #     output_dir = trainer.output_dir
+        #
+        # tf.compat.v1.reset_default_graph()
+
     # 直接读取模型
     # Testing on test with best model
     else:
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
 
-    # trainer = Trainer(options)
-    # # 直接读取模型
-    # if options['load_model']:
-    #     save_path = options['model_load_dir']
-    #     path_logger_file = trainer.path_logger_file
-    #     output_dir = trainer.output_dir
+
+    trainer = Trainer(options)
+    # 直接读取模型
+    if options['load_model']:
+        save_path = options['model_load_dir']
+        path_logger_file = trainer.path_logger_file
+        output_dir = trainer.output_dir
+
+    global_nn = GlobalMLP(options)
+    global_rnn = global_nn.initialize_global_rnn()
+    global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
 
     # Testing
-    # with tf.compat.v1.Session(config=config) as sess:
-    #     trainer.initialize(restore=save_path, sess=sess)
-    #
-    #     trainer.test_rollouts = 100
-    #
-    #     os.mkdir(path_logger_file + "/" + "test_beam")
-    #     trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-    #     with open(output_dir + '/scores.txt', 'a') as score_file:
-    #         score_file.write("Test (beam) scores with best model from " + save_path + "\n")
-    #     trainer.test_environment = trainer.test_test_environment
-    #     trainer.test_environment.test_rollouts = 100
-    #
-    #     trainer.test(sess, beam=True, print_paths=True, save_model=False)
-    #
-    #     if options['nell_evaluation'] == 1:
-    #         nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", trainer.data_input_dir+'/sort_test.pairs' )
+    with tf.compat.v1.Session(config=config) as sess:
+        trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+
+
+        trainer.test_rollouts = 100
+
+        os.mkdir(path_logger_file + "/" + "test_beam")
+        trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
+        with open(output_dir + '/scores.txt', 'a') as score_file:
+            score_file.write("Test (beam) scores with best model from " + save_path + "\n")
+        trainer.test_environment = trainer.test_test_environment
+        trainer.test_environment.test_rollouts = 100
+
+        trainer.test(sess, beam=True, print_paths=True, save_model=False)
+
+        if options['nell_evaluation'] == 1:
+            nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", trainer.data_input_dir+'/sort_test.pairs' )
+

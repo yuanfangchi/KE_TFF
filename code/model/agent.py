@@ -1,9 +1,13 @@
 import numpy as np
 import tensorflow as tf
-import tensorflow_federated as tff
+import logging
+import sys
 
 
-class Agent(tf.keras.Model):
+logger = logging.getLogger()
+logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
+
+class Agent(object):
 
     def __init__(self, params):
         super(Agent, self).__init__()
@@ -21,12 +25,13 @@ class Agent(tf.keras.Model):
         self.train_entities = params['train_entity_embeddings']
         self.train_relations = params['train_relation_embeddings']
 
+        self.path_length = params['path_length']
         self.num_rollouts = params['num_rollouts']
         self.test_rollouts = params['test_rollouts']
         self.LSTM_Layers = params['LSTM_layers']
-        self.batch_size = params['batch_size'] * params['num_rollouts']
+        self.batch_size = params['batch_size']
         self.dummy_start_label = tf.constant(
-            np.ones(self.batch_size, dtype='int64') * params['relation_vocab']['DUMMY_START_RELATION'])
+            np.ones(self.batch_size * self.num_rollouts, dtype='int64') * params['relation_vocab']['DUMMY_START_RELATION'])
 
         self.entity_embedding_size = self.embedding_size
         self.use_entity_embeddings = params['use_entity_embeddings']
@@ -56,23 +61,14 @@ class Agent(tf.keras.Model):
                                                        trainable=self.train_entities)
             self.entity_embedding_init = self.entity_lookup_table.assign(self.entity_embedding_placeholder)
 
-        with tf.compat.v1.variable_scope("policy_step", reuse=tf.compat.v1.AUTO_REUSE):
-            cells = []
-            for _ in range(self.LSTM_Layers):
-                cells.append(tf.compat.v1.nn.rnn_cell.LSTMCell(self.m * self.hidden_size, use_peepholes=True, state_is_tuple=True))
-            self.policy_step = tf.compat.v1.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
+        with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
+            self.loss_placeholder = tf.compat.v1.placeholder(tf.float32, [self.batch_size * self.num_rollouts])
+            self.all_loss = [self.path_length, self.batch_size * self.num_rollouts]
+            self.all_loss_init = self.all_loss.append(self.loss_placeholder)
 
     def get_mem_shape(self):
         return (self.LSTM_Layers, 2, None, self.m * self.hidden_size)
 
-    @tf.function
-    def policy_MLP(self, state):
-        with tf.compat.v1.variable_scope("MLP_for_policy", reuse=tf.compat.v1.AUTO_REUSE):
-            hidden = tf.compat.v1.layers.dense(state, 4 * self.hidden_size, activation=tf.nn.relu)
-            output = tf.compat.v1.layers.dense(hidden, self.m * self.embedding_size, activation=tf.nn.relu)
-        return output
-
-    @tf.function
     def action_encoder(self, next_relations, next_entities):
         with tf.compat.v1.variable_scope("lookup_table_edge_encoder", reuse=tf.compat.v1.AUTO_REUSE):
             relation_embedding = tf.nn.embedding_lookup(params=self.relation_lookup_table, ids=next_relations)
@@ -83,13 +79,14 @@ class Agent(tf.keras.Model):
                 action_embedding = relation_embedding
         return action_embedding
 
-    @tf.function
     def step(self, next_relations, next_entities, prev_state, prev_relation, query_embedding, current_entities,
-             label_action, range_arr, first_step_of_test):
+             global_policy_rnn, global_hidden_layer, global_output_layer, label_action, range_arr, first_step_of_test):
 
         prev_action_embedding = self.action_encoder(prev_relation, current_entities)
+
         # 1. one step of rnn
-        output, new_state = self.policy_step(prev_action_embedding, prev_state)  # output: [B, 4D]
+        #output, new_state = self.policy_step(prev_action_embedding, prev_state)  # output: [B, 4D]
+        output, new_state = global_policy_rnn(prev_action_embedding, prev_state)  # output: [B, 4D]
 
         # Get state vector
         prev_entity = tf.nn.embedding_lookup(params=self.entity_lookup_table, ids=current_entities)
@@ -102,7 +99,9 @@ class Agent(tf.keras.Model):
 
         # MLP for policy#
 
-        output = self.policy_MLP(state_query_concat)
+        hidden_layer_output = global_hidden_layer(state_query_concat)
+        output = global_output_layer(hidden_layer_output)
+
         output_expanded = tf.expand_dims(output, axis=1)  # [B, 1, 2D]
         prelim_scores = tf.reduce_sum(input_tensor=tf.multiply(candidate_action_embeddings, output_expanded), axis=2)
 
@@ -127,21 +126,23 @@ class Agent(tf.keras.Model):
 
         return loss, new_state, tf.nn.log_softmax(scores), action_idx, chosen_relation
 
-    def __call__(self, candidate_relation_sequence, candidate_entity_sequence, current_entities,
+    def __call__(self, candidate_relation_sequence, candidate_entity_sequence, current_entities, global_policy_rnn,
+                 global_hidden_layer, global_output_layer,
                  path_label, query_relation, range_arr, first_step_of_test, T=3, entity_sequence=0):
-
         self.baseline_inputs = []
         # get the query vector
         query_embedding = tf.nn.embedding_lookup(params=self.relation_lookup_table, ids=query_relation)  # [B, 2D]
-        state = self.policy_step.zero_state(batch_size=self.batch_size, dtype=tf.float32)
+        state = global_policy_rnn.zero_state(batch_size=self.batch_size * self.num_rollouts, dtype=tf.float32)
 
         prev_relation = self.dummy_start_label
 
         all_loss = []  # list of loss tensors each [B,]
         all_logits = []  # list of actions each [B,]
         action_idx = []
+        rnn_state = []
+        chosen_relations = []
 
-        with tf.compat.v1.variable_scope("policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
+        with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
             for t in range(T):
                 if t > 0:
                     scope.reuse_variables()
@@ -155,6 +156,9 @@ class Agent(tf.keras.Model):
                                                                               next_possible_entities,
                                                                               state, prev_relation, query_embedding,
                                                                               current_entities_t,
+                                                                              global_policy_rnn,
+                                                                              global_hidden_layer,
+                                                                              global_output_layer,
                                                                               label_action=path_label_t,
                                                                               range_arr=range_arr,
                                                                               first_step_of_test=first_step_of_test)
@@ -162,8 +166,10 @@ class Agent(tf.keras.Model):
                 all_loss.append(loss)
                 all_logits.append(logits)
                 action_idx.append(idx)
+                rnn_state.append(state)
                 prev_relation = chosen_relation
-
+                chosen_relations.append(chosen_relation)
             # [(B, T), 4D]
+                self.all_loss[t] = loss
 
-        return all_loss, all_logits, action_idx
+        return self.all_loss, all_logits, action_idx, rnn_state, chosen_relations

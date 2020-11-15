@@ -13,6 +13,7 @@ class Episode(object):
     def __init__(self, graph, data, params):
         self.grapher = graph
         self.batch_size, self.path_len, num_rollouts, test_rollouts, positive_reward, negative_reward, mode, batcher = params
+        self.data = data
         self.mode = mode
         if self.mode == 'train':
             self.num_rollouts = num_rollouts
@@ -60,6 +61,17 @@ class Episode(object):
         reward = np.select(condlist, choicelist)  # [B,]
         return reward
 
+    def return_next_actions(self, current_entities, path_idx):
+        next_actions = self.grapher.return_next_actions(current_entities, self.start_entities, self.query_relation,
+                                                        self.end_entities, self.all_answers,
+                                                        path_idx == self.path_len - 1,
+                                                        self.num_rollouts)
+        self.state['next_relations'] = next_actions[:, :, 1]
+        self.state['next_entities'] = next_actions[:, :, 0]
+        self.state['current_entities'] = current_entities
+
+        return self.state
+
     def __call__(self, action):
         self.current_hop += 1
         self.current_entities = self.state['next_entities'][np.arange(self.no_examples*self.num_rollouts), action]
@@ -75,7 +87,7 @@ class Episode(object):
 
 
 class env(object):
-    def __init__(self, params, mode='train'):
+    def __init__(self, params, agent, mode='train'):
 
         self.batch_size = params['batch_size']
         self.num_rollouts = params['num_rollouts']
@@ -89,29 +101,44 @@ class env(object):
             self.batcher = RelationEntityBatcher(input_dir=input_dir,
                                                  batch_size=params['batch_size'],
                                                  entity_vocab=params['entity_vocab'],
-                                                 relation_vocab=params['relation_vocab']
+                                                 relation_vocab=params['relation_vocab'],
+                                                 agent=agent
                                                  )
         else:
             self.batcher = RelationEntityBatcher(input_dir=input_dir,
                                                  mode =mode,
                                                  batch_size=params['batch_size'],
                                                  entity_vocab=params['entity_vocab'],
-                                                 relation_vocab=params['relation_vocab'])
+                                                 relation_vocab=params['relation_vocab'],
+                                                 agent=agent
+                                                 )
 
             self.total_no_examples = self.batcher.store.shape[0]
-        self.grapher = RelationEntityGrapher(triple_store=params['data_input_dir'] + '/' + 'graph.txt',
-                                             max_num_actions=params['max_num_actions'],
-                                             entity_vocab=params['entity_vocab'],
-                                             relation_vocab=params['relation_vocab'])
+        if (mode == 'train' or mode == 'dev') and agent is not None:
+            self.grapher = RelationEntityGrapher(triple_store=params['data_input_dir'] + '/' + 'graph_' + agent + '.txt',
+                                                 max_num_actions=params['max_num_actions'],
+                                                 entity_vocab=params['entity_vocab'],
+                                                 relation_vocab=params['relation_vocab'])
+        else:
+            self.grapher = RelationEntityGrapher(
+                triple_store=params['data_input_dir'] + '/' + 'graph.txt',
+                max_num_actions=params['max_num_actions'],
+                entity_vocab=params['entity_vocab'],
+                relation_vocab=params['relation_vocab'])
 
     def get_episodes(self):
         params = self.batch_size, self.path_len, self.num_rollouts, self.test_rollouts, self.positive_reward, self.negative_reward, self.mode, self.batcher
         if self.mode == 'train':
             for data in self.batcher.yield_next_batch_train():
-
                 yield Episode(self.grapher, data, params)
         else:
             for data in self.batcher.yield_next_batch_test():
+
                 if data == None:
                     return
                 yield Episode(self.grapher, data, params)
+
+    def get_handover_episodes(self, episode_handover):
+        params = self.batch_size, self.path_len, self.num_rollouts, self.test_rollouts, self.positive_reward, self.negative_reward, self.mode, self.batcher
+
+        return Episode(self.grapher, episode_handover.data, params)
