@@ -45,6 +45,7 @@ class Trainer(object):
         self.rev_relation_vocab = self.train_environment.grapher.rev_relation_vocab
         self.rev_entity_vocab = self.train_environment.grapher.rev_entity_vocab
         self.max_hits_at_10 = 0
+        self.max_num_actions = params['max_num_actions']
         self.ePAD = self.entity_vocab['PAD']
         self.rPAD = self.relation_vocab['PAD']
         # optimize
@@ -68,7 +69,6 @@ class Trainer(object):
 
 
     def calc_reinforce_loss(self):
-        print (self.per_example_loss)
         loss = tf.stack(self.per_example_loss, axis=1)  # [B, T]
 
         self.tf_baseline = self.baseline.get_baseline_value()
@@ -102,7 +102,7 @@ class Trainer(object):
         self.input_path = []
         self.first_state_of_test = tf.compat.v1.placeholder(tf.bool, name="is_first_state_of_test")
         self.query_relation = tf.compat.v1.placeholder(tf.int32, [None], name="query_relation")
-        self.range_arr = tf.compat.v1.placeholder(tf.int32, shape=[None, ])
+        self.range_arr = tf.compat.v1.placeholder(tf.int32, shape=[None, ], name="range_arr")
         self.global_step = tf.Variable(0, trainable=False)
         self.decaying_beta = tf.compat.v1.train.exponential_decay(self.beta, self.global_step,
                                                    200, 0.90, staircase=False)
@@ -126,9 +126,6 @@ class Trainer(object):
             self.candidate_entity_sequence.append(next_possible_entities)
             self.entity_sequence.append(start_entities)
         self.loss_before_reg = tf.constant(0.0)
-
-        #self.per_example_loss_placeholder, self.per_example_logits_placeholder = tf.compat.v1.placeholder(tf.float32,
-                                                              # [self.action_vocab_size, 2 * self.embedding_size])
 
         self.per_example_loss, self.per_example_logits, self.action_idx, self.rnn_state, self.chosen_relations= self.agent(
             self.candidate_relation_sequence,
@@ -271,12 +268,16 @@ class Trainer(object):
             # for each time step
             loss_before_regularization = []
             logits = []
+            handover_idx = None
             for i in range(self.path_length):
                 current_entities_at_t = state['current_entities']
+                next_relations_at_t = state['next_relations']
+                next_entities_at_t = state['next_entities']
 
                 feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
                 feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
                 feed_dict[i][self.entity_sequence[i]] = state['current_entities']
+
                 per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i], self.chosen_relations[i]],
                                                   feed_dict=feed_dict[i])
 
@@ -289,12 +290,16 @@ class Trainer(object):
                 for j in range(len(state['current_entities'])):
                     if current_entities_at_t[j] != 0 and state['current_entities'][j] == 0:
                         current_entities_handover.append(current_entities_at_t[j])
+                        handover_idx = i
                     else:
                         current_entities_handover.append(0)
+
                 episode_handover_state = {}
-                episode_handover_state['current_entities'] = current_entities_handover
-                episode_handover_state['per_example_loss'] = per_example_loss
-                episode_handover_state['per_example_logits'] = per_example_logits
+                episode_handover_state['current_entities'] = current_entities_at_t
+                episode_handover_state['next_relations'] = next_relations_at_t
+                episode_handover_state['next_entities'] = next_entities_at_t
+                episode_handover_state['handover_entities'] = current_entities_handover
+                episode_handover_state['handover_idx'] = handover_idx
                 episode_handovers[episode].append((i, episode_handover_state))
 
             loss_before_regularization = np.stack(loss_before_regularization, axis=1)
@@ -352,71 +357,84 @@ class Trainer(object):
 
         self.batch_counter = 0
         for episode_handover in episode_handovers:
-            for handover_idx, episode_handover_state in episode_handovers[episode_handover]:
+            self.batch_counter += 1
 
-                self.batch_counter += 1
+            h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
+            feed_dict[0][self.query_relation] = episode_handover.get_query_relation()
 
-                h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
-                feed_dict[0][self.query_relation] = episode_handover.get_query_relation()
-
-                # get initial state
-                episode = self.train_environment.get_handover_episodes(episode_handover)
-                state = episode.return_next_actions(np.array(episode_handover_state['current_entities']), handover_idx)
-
+            # get initial state
+            episode = self.train_environment.get_handover_episodes(episode_handover)
+            state = None
+            for i, episode_handover_state in episode_handovers[episode_handover]:
                 loss_before_regularization = []
                 logits = []
 
-                if handover_idx != 0:
-                    for i in range(handover_idx):
-                        print (episode_handover_state['per_example_loss'])
-                        sess.run(self.agent.all_loss_init, {self.agent.loss_placeholder: episode_handover_state['per_example_loss']})
+                print (episode_handover_state['handover_idx'])
+                print (i)
 
-                for i in range(handover_idx, self.path_length):
+                if episode_handover_state['handover_idx'] is None or episode_handover_state['handover_idx'] < i:
+                    feed_dict[i][self.candidate_relation_sequence[i]] = episode_handover_state['next_relations']
+                    feed_dict[i][self.candidate_entity_sequence[i]] = episode_handover_state['next_entities']
+                    feed_dict[i][self.entity_sequence[i]] = episode_handover_state['current_entities']
+                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
+                        self.per_example_loss[i],
+                        self.per_example_logits[i], self.action_idx[i], self.rnn_state[i],
+                        self.chosen_relations[i]], feed_dict=feed_dict[i])
+                else:
+                    if state is None:
+                        print (episode_handover_state['handover_entities'])
+                        state = episode.return_next_actions(np.array(episode_handover_state['handover_entities']),
+                                                            episode_handover_state['handover_idx'])
+                        print ("YF --- state none --- YF")
                     feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
                     feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
                     feed_dict[i][self.entity_sequence[i]] = state['current_entities']
-                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i], self.chosen_relations[i]],
-                                                      feed_dict=feed_dict[i])
+                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
+                        self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i],
+                        self.chosen_relations[i]],
+                                                                                                             feed_dict=
+                                                                                                             feed_dict[
+                                                                                                                 i])
 
-                    loss_before_regularization.append(per_example_loss)
-                    logits.append(per_example_logits)
-                    # action = np.squeeze(action, axis=1)  # [B,]
-                    state = episode(idx)
-                loss_before_regularization = np.stack(loss_before_regularization, axis=1)
+                loss_before_regularization.append(per_example_loss)
+                logits.append(per_example_logits)
+                # action = np.squeeze(action, axis=1)  # [B,]
+                state = episode(idx)
+            loss_before_regularization = np.stack(loss_before_regularization, axis=1)
 
-                # get the final reward from the environment
-                rewards = episode.get_reward()
+            # get the final reward from the environment
+            rewards = episode.get_reward()
 
-                # computed cumulative discounted reward
-                cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
+            # computed cumulative discounted reward
+            cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
 
-                #self.check_trainable_variables()
-                #self.check_global_variables()
+            #self.check_trainable_variables()
+            #self.check_global_variables()
 
-                # backprop
-                batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
-                                                       feed_dict={self.cum_discounted_reward: cum_discounted_reward})
+            # backprop
+            batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
+                                                   feed_dict={self.cum_discounted_reward: cum_discounted_reward})
 
-                # print statistics
-                train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
+            # print statistics
+            train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
 
-                avg_reward = np.mean(rewards)
-                # now reshape the reward to [orig_batch_size, num_rollouts], I want to calculate for how many of the
-                # entity pair, atleast one of the path get to the right answer
-                reward_reshape = np.reshape(rewards, (self.batch_size, self.num_rollouts))  # [orig_batch, num_rollouts]
-                reward_reshape = np.sum(reward_reshape, axis=1)  # [orig_batch]
-                reward_reshape = (reward_reshape > 0)
-                num_ep_correct = np.sum(reward_reshape)
+            avg_reward = np.mean(rewards)
+            # now reshape the reward to [orig_batch_size, num_rollouts], I want to calculate for how many of the
+            # entity pair, atleast one of the path get to the right answer
+            reward_reshape = np.reshape(rewards, (self.batch_size, self.num_rollouts))  # [orig_batch, num_rollouts]
+            reward_reshape = np.sum(reward_reshape, axis=1)  # [orig_batch]
+            reward_reshape = (reward_reshape > 0)
+            num_ep_correct = np.sum(reward_reshape)
 
 
-                if np.isnan(train_loss):
-                    raise ArithmeticError("Error in computing loss")
+            if np.isnan(train_loss):
+                raise ArithmeticError("Error in computing loss")
 
-                logger.info("episode handover task, batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
-                            "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".
-                            format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
-                                   (num_ep_correct / self.batch_size),
-                                   train_loss))
+            logger.info("episode handover task, batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
+                        "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".
+                        format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
+                               (num_ep_correct / self.batch_size),
+                               train_loss))
 
             with open(self.output_dir + '/scores.txt', 'a') as score_file:
                 score_file.write("Score for iteration " + str(self.batch_counter) + "\n")

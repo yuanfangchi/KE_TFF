@@ -30,6 +30,7 @@ class Agent(object):
         self.test_rollouts = params['test_rollouts']
         self.LSTM_Layers = params['LSTM_layers']
         self.batch_size = params['batch_size']
+        self.max_num_actions = params['max_num_actions']
         self.dummy_start_label = tf.constant(
             np.ones(self.batch_size * self.num_rollouts, dtype='int64') * params['relation_vocab']['DUMMY_START_RELATION'])
 
@@ -61,10 +62,23 @@ class Agent(object):
                                                        trainable=self.train_entities)
             self.entity_embedding_init = self.entity_lookup_table.assign(self.entity_embedding_placeholder)
 
-        with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
-            self.loss_placeholder = tf.compat.v1.placeholder(tf.float32, [self.batch_size * self.num_rollouts])
-            self.all_loss = [self.path_length, self.batch_size * self.num_rollouts]
-            self.all_loss_init = self.all_loss.append(self.loss_placeholder)
+        with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE):
+            self.pretrained_loss_placeholder = tf.compat.v1.placeholder(tf.float32, [self.path_length, self.batch_size * self.num_rollouts], "pretrained_loss_placeholder")
+            self.pretrained_loss = tf.compat.v1.get_variable("pretrained_loss", shape=[self.path_length, self.batch_size * self.num_rollouts],
+                                                             dtype=tf.float32, initializer=tf.compat.v1.ones_initializer(),
+                                                             trainable=False)
+            self.pretrained_loss_init = self.pretrained_loss.assign(self.pretrained_loss_placeholder)
+
+            self.pretrained_logit_placeholder = tf.compat.v1.placeholder(tf.float32, [self.path_length,
+                                                                                     self.batch_size * self.num_rollouts, self.max_num_actions],
+                                                                        "pretrained_logit_placeholder")
+            self.pretrained_logit = tf.compat.v1.get_variable("pretrained_logit", shape=[self.path_length,
+                                                                                       self.batch_size * self.num_rollouts, self.max_num_actions],
+                                                             dtype=tf.float32,
+                                                             initializer=tf.compat.v1.ones_initializer(),
+                                                             trainable=False)
+            self.pretrained_logit_init = self.pretrained_logit.assign(self.pretrained_logit_placeholder)
+
 
     def get_mem_shape(self):
         return (self.LSTM_Layers, 2, None, self.m * self.hidden_size)
@@ -170,6 +184,5 @@ class Agent(object):
                 prev_relation = chosen_relation
                 chosen_relations.append(chosen_relation)
             # [(B, T), 4D]
-                self.all_loss[t] = loss
 
-        return self.all_loss, all_logits, action_idx, rnn_state, chosen_relations
+        return all_loss, all_logits, action_idx, rnn_state, chosen_relations

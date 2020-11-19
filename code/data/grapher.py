@@ -39,18 +39,12 @@ class RelationEntityGrapher:
             self.array_store[e1, 0, 1] = self.relation_vocab['NO_OP']
             self.array_store[e1, 0, 0] = e1
 
-            #ADD toB/toC action?
-            #self.array_store[e1, 0, 1] = self.relation_vocab['TO_B']
-            #self.array_store[e1, 0, 0] = to_B_Entity
-
             for r, e2 in self.store[e1]:
                 if num_actions == self.array_store.shape[1]:
                     break
                 self.array_store[e1,num_actions,0] = e2
                 self.array_store[e1,num_actions,1] = r
                 num_actions += 1
-
-                # print (str(e1) + " " + str(r) + " " + str(e2))
         del self.store
         self.store = None
 
