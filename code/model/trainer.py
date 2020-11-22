@@ -691,6 +691,7 @@ def test_auc(options, save_path, path_logger_file, output_dir, data_input_dir=No
 
         trainer.test_rollouts = 100
 
+        #if not os.path.isdir(path_logger_file + "/" + "test_beam"):
         os.mkdir(path_logger_file + "/" + "test_beam")
         trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
         with open(output_dir + '/scores.txt', 'a') as score_file:
@@ -746,7 +747,9 @@ if __name__ == '__main__':
     # 不直接读取模型
     if not options['load_model']:
 
-        trainer = Trainer(options, agent_names[0])
+        #for i in range(len(agent_names)):
+        i = None
+        trainer = Trainer(options)
 
         global_nn = GlobalMLP(options)
         global_rnn = global_nn.initialize_global_rnn()
@@ -754,8 +757,11 @@ if __name__ == '__main__':
 
         with tf.compat.v1.Session(config=config) as sess:
             # 初始化训练模型
-
-            sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+            if i == 0 or i is None:
+                sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+            else:
+                trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                                   sess=sess)
             trainer.initialize_pretrained_embeddings(sess=sess)
 
             # 训练
@@ -768,41 +774,41 @@ if __name__ == '__main__':
 
         test_auc(options, save_path, path_logger_file, output_dir)
 
-        trainer = Trainer(options, agent_names[1])
-
-        global_nn = GlobalMLP(options)
-        global_rnn = global_nn.initialize_global_rnn()
-        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-
-        with tf.compat.v1.Session(config=config) as sess:
-            trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-            trainer.initialize_pretrained_embeddings(sess=sess)
-
-            trainer.train(sess)
-            save_path = trainer.save_path
-            path_logger_file = trainer.path_logger_file
-            output_dir = trainer.output_dir
-
-        tf.compat.v1.reset_default_graph()
-
-        test_auc(options, save_path, path_logger_file, output_dir)
-
-        trainer = Trainer(options, agent_names[2])
-
-        global_nn = GlobalMLP(options)
-        global_rnn = global_nn.initialize_global_rnn()
-        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-
-        with tf.compat.v1.Session(config=config) as sess:
-            trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-            trainer.initialize_pretrained_embeddings(sess=sess)
-
-            trainer.train(sess)
-            save_path = trainer.save_path
-            path_logger_file = trainer.path_logger_file
-            output_dir = trainer.output_dir
-
-        tf.compat.v1.reset_default_graph()
+        # trainer = Trainer(options, agent_names[1])
+        #
+        # global_nn = GlobalMLP(options)
+        # global_rnn = global_nn.initialize_global_rnn()
+        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+        #
+        # with tf.compat.v1.Session(config=config) as sess:
+        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+        #     trainer.initialize_pretrained_embeddings(sess=sess)
+        #
+        #     trainer.train(sess)
+        #     save_path = trainer.save_path
+        #     path_logger_file = trainer.path_logger_file
+        #     output_dir = trainer.output_dir
+        #
+        # tf.compat.v1.reset_default_graph()
+        #
+        # test_auc(options, save_path, path_logger_file, output_dir)
+        #
+        # trainer = Trainer(options, agent_names[2])
+        #
+        # global_nn = GlobalMLP(options)
+        # global_rnn = global_nn.initialize_global_rnn()
+        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+        #
+        # with tf.compat.v1.Session(config=config) as sess:
+        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+        #     trainer.initialize_pretrained_embeddings(sess=sess)
+        #
+        #     trainer.train(sess)
+        #     save_path = trainer.save_path
+        #     path_logger_file = trainer.path_logger_file
+        #     output_dir = trainer.output_dir
+        #
+        # tf.compat.v1.reset_default_graph()
 
     # 直接读取模型
     # Testing on test with best model
@@ -810,5 +816,5 @@ if __name__ == '__main__':
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
 
-    test_auc(options, save_path, path_logger_file, output_dir)
+    #test_auc(options, save_path, path_logger_file, output_dir)
 
