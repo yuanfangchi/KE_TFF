@@ -259,12 +259,6 @@ class Trainer(object):
             # get initial state
             state = episode.get_state()
 
-            # bb.notify_bb({
-            #     "entity": "sgg",
-            #     "relation": "isStudent",
-            #     "sendTo": 0
-            # })
-
             # for each time step
             loss_before_regularization = []
             logits = []
@@ -357,95 +351,92 @@ class Trainer(object):
 
         self.batch_counter = 0
         for episode_handover in episode_handovers:
-            self.batch_counter += 1
-
-            h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
-            feed_dict[0][self.query_relation] = episode_handover.get_query_relation()
-
-            # get initial state
-            episode = self.train_environment.get_handover_episodes(episode_handover)
-            state = None
+            reconstruct_state_map = {}
             for i, episode_handover_state in episode_handovers[episode_handover]:
-                loss_before_regularization = []
-                logits = []
-
-                print (episode_handover_state['handover_idx'])
-                print (i)
-
                 if episode_handover_state['handover_idx'] is None or episode_handover_state['handover_idx'] < i:
-                    feed_dict[i][self.candidate_relation_sequence[i]] = episode_handover_state['next_relations']
-                    feed_dict[i][self.candidate_entity_sequence[i]] = episode_handover_state['next_entities']
-                    feed_dict[i][self.entity_sequence[i]] = episode_handover_state['current_entities']
-                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
-                        self.per_example_loss[i],
-                        self.per_example_logits[i], self.action_idx[i], self.rnn_state[i],
-                        self.chosen_relations[i]], feed_dict=feed_dict[i])
+                    reconstruct_state_map[i] = episode_handover_state
+                    pass
                 else:
-                    if state is None:
-                        print (episode_handover_state['handover_entities'])
-                        state = episode.return_next_actions(np.array(episode_handover_state['handover_entities']),
+                    self.batch_counter += 1
+                    h = sess.partial_run_setup(fetches=fetches, feeds=feeds)
+                    feed_dict[0][self.query_relation] = episode_handover.get_query_relation()
+
+                    # get initial state
+                    episode = self.train_environment.get_handover_episodes(episode_handover)
+
+                    loss_before_regularization = []
+                    logits = []
+
+                    reconstruct_path_idx = 0
+                    for path_idx in reconstruct_state_map.keys():
+                        feed_dict[path_idx][self.candidate_relation_sequence[path_idx]] = reconstruct_state_map[path_idx]['next_relations']
+                        feed_dict[path_idx][self.candidate_entity_sequence[path_idx]] = reconstruct_state_map[path_idx]['next_entities']
+                        feed_dict[path_idx][self.entity_sequence[path_idx]] = reconstruct_state_map[path_idx]['current_entities']
+                        per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
+                            self.per_example_loss[path_idx],
+                            self.per_example_logits[path_idx], self.action_idx[path_idx], self.rnn_state[path_idx],
+                            self.chosen_relations[path_idx]], feed_dict=feed_dict[path_idx])
+                        reconstruct_path_idx = path_idx
+                    reconstruct_state_map[i] = episode_handover_state
+                    new_state = episode.return_next_actions(np.array(episode_handover_state['handover_entities']),
                                                             episode_handover_state['handover_idx'])
-                        print ("YF --- state none --- YF")
-                    feed_dict[i][self.candidate_relation_sequence[i]] = state['next_relations']
-                    feed_dict[i][self.candidate_entity_sequence[i]] = state['next_entities']
-                    feed_dict[i][self.entity_sequence[i]] = state['current_entities']
-                    per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
-                        self.per_example_loss[i], self.per_example_logits[i], self.action_idx[i], self.rnn_state[i],
-                        self.chosen_relations[i]],
-                                                                                                             feed_dict=
-                                                                                                             feed_dict[
-                                                                                                                 i])
+                    for j in range(reconstruct_path_idx + 1, self.path_length):
+                        feed_dict[j][self.candidate_relation_sequence[j]] = new_state['next_relations']
+                        feed_dict[j][self.candidate_entity_sequence[j]] = new_state['next_entities']
+                        feed_dict[j][self.entity_sequence[j]] = new_state['current_entities']
+                        per_example_loss, per_example_logits, idx, rnn_state, chosen_relation = sess.partial_run(h, [
+                            self.per_example_loss[j], self.per_example_logits[j], self.action_idx[j], self.rnn_state[j],
+                            self.chosen_relations[j]],
+                                                                                                                 feed_dict=
+                                                                                                                 feed_dict[
+                                                                                                                     j])
+                        new_state = episode(idx)
+                    loss_before_regularization.append(per_example_loss)
+                    logits.append(per_example_logits)
 
-                loss_before_regularization.append(per_example_loss)
-                logits.append(per_example_logits)
-                # action = np.squeeze(action, axis=1)  # [B,]
-                state = episode(idx)
-            loss_before_regularization = np.stack(loss_before_regularization, axis=1)
+                    loss_before_regularization = np.stack(loss_before_regularization, axis=1)
 
-            # get the final reward from the environment
-            rewards = episode.get_reward()
+                    # get the final reward from the environment
+                    rewards = episode.get_reward()
 
-            # computed cumulative discounted reward
-            cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
+                    # computed cumulative discounted reward
+                    cum_discounted_reward = self.calc_cum_discounted_reward(rewards)  # [B, T]
 
-            #self.check_trainable_variables()
-            #self.check_global_variables()
+                    # backprop
+                    batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
+                                                           feed_dict={self.cum_discounted_reward: cum_discounted_reward})
 
-            # backprop
-            batch_total_loss, _ = sess.partial_run(h, [self.loss_op, self.dummy],
-                                                   feed_dict={self.cum_discounted_reward: cum_discounted_reward})
+                    # print statistics
+                    train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
 
-            # print statistics
-            train_loss = 0.98 * train_loss + 0.02 * batch_total_loss
-
-            avg_reward = np.mean(rewards)
-            # now reshape the reward to [orig_batch_size, num_rollouts], I want to calculate for how many of the
-            # entity pair, atleast one of the path get to the right answer
-            reward_reshape = np.reshape(rewards, (self.batch_size, self.num_rollouts))  # [orig_batch, num_rollouts]
-            reward_reshape = np.sum(reward_reshape, axis=1)  # [orig_batch]
-            reward_reshape = (reward_reshape > 0)
-            num_ep_correct = np.sum(reward_reshape)
+                    avg_reward = np.mean(rewards)
+                    # now reshape the reward to [orig_batch_size, num_rollouts], I want to calculate for how many of the
+                    # entity pair, atleast one of the path get to the right answer
+                    reward_reshape = np.reshape(rewards, (self.batch_size, self.num_rollouts))  # [orig_batch, num_rollouts]
+                    reward_reshape = np.sum(reward_reshape, axis=1)  # [orig_batch]
+                    reward_reshape = (reward_reshape > 0)
+                    num_ep_correct = np.sum(reward_reshape)
 
 
-            if np.isnan(train_loss):
-                raise ArithmeticError("Error in computing loss")
+                    if np.isnan(train_loss):
+                        raise ArithmeticError("Error in computing loss")
 
-            logger.info("episode handover task, batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
-                        "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".
-                        format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
-                               (num_ep_correct / self.batch_size),
-                               train_loss))
+                    logger.info("episode handover task, batch_counter: {0:4d}, num_hits: {1:7.4f}, avg. reward per batch {2:7.4f}, "
+                                "num_ep_correct {3:4d}, avg_ep_correct {4:7.4f}, train loss {5:7.4f}".
+                                format(self.batch_counter, np.sum(rewards), avg_reward, num_ep_correct,
+                                       (num_ep_correct / self.batch_size),
+                                       train_loss))
 
-            with open(self.output_dir + '/scores.txt', 'a') as score_file:
-                score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
-            os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
-            self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
+                    with open(self.output_dir + '/scores.txt', 'a') as score_file:
+                        score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
+                    os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
+                    self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
 
-            self.test(sess, beam=True, print_paths=False)
+                    self.test(sess, beam=True, print_paths=False)
 
-            logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+                    logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
-            gc.collect()
+                    gc.collect()
 
     def test(self, sess, beam=False, print_paths=False, save_model = True, auc = False):
         batch_counter = 0
@@ -682,16 +673,48 @@ class Trainer(object):
         idx = idx[:, -k:]  # take the last k highest indices # [B , k]
         return idx.reshape((-1))
 
+def test_auc(options, save_path, path_logger_file, output_dir, data_input_dir=None):
+    trainer = Trainer(options)
+    # 直接读取模型
+    if options['load_model']:
+        save_path = options['model_load_dir']
+        path_logger_file = trainer.path_logger_file
+        output_dir = trainer.output_dir
+
+    global_nn = GlobalMLP(options)
+    global_rnn = global_nn.initialize_global_rnn()
+    global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
+    # Testing
+    with tf.compat.v1.Session(config=config) as sess:
+        trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+
+        trainer.test_rollouts = 100
+
+        os.mkdir(path_logger_file + "/" + "test_beam")
+        trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
+        with open(output_dir + '/scores.txt', 'a') as score_file:
+            score_file.write("Test (beam) scores with best model from " + save_path + "\n")
+        trainer.test_environment = trainer.test_test_environment
+        trainer.test_environment.test_rollouts = 100
+
+        trainer.test(sess, beam=True, print_paths=True, save_model=False)
+
+        if options['nell_evaluation'] == 1:
+            nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers",
+                      data_input_dir + '/sort_test.pairs')
+
+    tf.compat.v1.reset_default_graph()
+
 
 if __name__ == '__main__':
     # read command line options
     options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
-    agent_names = ['agent_a', 'agent_b', 'agent_c']
-    #agent_names = ['agent_a']
-    #DataDistributor(options, agent_names)
 
-    #bb = Blackboard()
-    #bb.connect_to_bb()
+    agent_names = ['agent_a', 'agent_b', 'agent_c']
+
+    if not os.path.isfile(options['data_input_dir'] + '/' + 'graph_' + agent_names[0] + '.txt'):
+        DataDistributor(options, agent_names)
 
     # Set logging
     logger.setLevel(logging.INFO)
@@ -743,37 +766,7 @@ if __name__ == '__main__':
 
         tf.compat.v1.reset_default_graph()
 
-        # trainer = Trainer(options)
-        # # 直接读取模型
-        # if options['load_model']:
-        #     save_path = options['model_load_dir']
-        #     path_logger_file = trainer.path_logger_file
-        #     output_dir = trainer.output_dir
-        #
-        # global_nn = GlobalMLP(options)
-        # global_rnn = global_nn.initialize_global_rnn()
-        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-        #
-        # # Testing
-        # with tf.compat.v1.Session(config=config) as sess:
-        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-        #
-        #     trainer.test_rollouts = 100
-        #
-        #     os.mkdir(path_logger_file + "/" + "test_beam")
-        #     trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-        #     with open(output_dir + '/scores.txt', 'a') as score_file:
-        #         score_file.write("Test (beam) scores with best model from " + save_path + "\n")
-        #     trainer.test_environment = trainer.test_test_environment
-        #     trainer.test_environment.test_rollouts = 100
-        #
-        #     trainer.test(sess, beam=True, print_paths=True, save_model=False)
-        #
-        #     if options['nell_evaluation'] == 1:
-        #         nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers",
-        #                   trainer.data_input_dir + '/sort_test.pairs')
-        #
-        # tf.compat.v1.reset_default_graph()
+        test_auc(options, save_path, path_logger_file, output_dir)
 
         trainer = Trainer(options, agent_names[1])
 
@@ -785,31 +778,31 @@ if __name__ == '__main__':
             trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
             trainer.initialize_pretrained_embeddings(sess=sess)
 
-            trainer.train_handover_episode(sess, episode_handovers)
+            trainer.train(sess)
             save_path = trainer.save_path
             path_logger_file = trainer.path_logger_file
             output_dir = trainer.output_dir
 
         tf.compat.v1.reset_default_graph()
 
-        # print ('YF ======= agent 3 ========= YF')
-        #
-        # trainer = Trainer(options, agent_names[2])
-        #
-        # global_nn = GlobalMLP(options)
-        # global_rnn = global_nn.initialize_global_rnn()
-        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-        #
-        # with tf.compat.v1.Session(config=config) as sess:
-        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-        #     trainer.initialize_pretrained_embeddings(sess=sess)
-        #
-        #     trainer.train_handover_episode(sess, episode_handovers)
-        #     save_path = trainer.save_path
-        #     path_logger_file = trainer.path_logger_file
-        #     output_dir = trainer.output_dir
-        #
-        # tf.compat.v1.reset_default_graph()
+        test_auc(options, save_path, path_logger_file, output_dir)
+
+        trainer = Trainer(options, agent_names[2])
+
+        global_nn = GlobalMLP(options)
+        global_rnn = global_nn.initialize_global_rnn()
+        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
+        with tf.compat.v1.Session(config=config) as sess:
+            trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
+            trainer.initialize_pretrained_embeddings(sess=sess)
+
+            trainer.train(sess)
+            save_path = trainer.save_path
+            path_logger_file = trainer.path_logger_file
+            output_dir = trainer.output_dir
+
+        tf.compat.v1.reset_default_graph()
 
     # 直接读取模型
     # Testing on test with best model
@@ -817,34 +810,5 @@ if __name__ == '__main__':
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
 
-
-    trainer = Trainer(options)
-    # 直接读取模型
-    if options['load_model']:
-        save_path = options['model_load_dir']
-        path_logger_file = trainer.path_logger_file
-        output_dir = trainer.output_dir
-
-    global_nn = GlobalMLP(options)
-    global_rnn = global_nn.initialize_global_rnn()
-    global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-
-    # Testing
-    with tf.compat.v1.Session(config=config) as sess:
-        trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-
-
-        trainer.test_rollouts = 100
-
-        os.mkdir(path_logger_file + "/" + "test_beam")
-        trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
-        with open(output_dir + '/scores.txt', 'a') as score_file:
-            score_file.write("Test (beam) scores with best model from " + save_path + "\n")
-        trainer.test_environment = trainer.test_test_environment
-        trainer.test_environment.test_rollouts = 100
-
-        trainer.test(sess, beam=True, print_paths=True, save_model=False)
-
-        if options['nell_evaluation'] == 1:
-            nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers", trainer.data_input_dir+'/sort_test.pairs' )
+    test_auc(options, save_path, path_logger_file, output_dir)
 

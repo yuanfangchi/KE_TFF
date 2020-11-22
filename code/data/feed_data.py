@@ -101,7 +101,6 @@ class RelationEntityBatcher():
             if remaining_triples == 0:
                 return
 
-
             if remaining_triples - self.batch_size > 0:
                 batch_idx = np.arange(current_idx, current_idx+self.batch_size)
                 current_idx += self.batch_size

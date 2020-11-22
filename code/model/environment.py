@@ -133,7 +133,6 @@ class env(object):
                 yield Episode(self.grapher, data, params)
         else:
             for data in self.batcher.yield_next_batch_test():
-
                 if data == None:
                     return
                 yield Episode(self.grapher, data, params)
