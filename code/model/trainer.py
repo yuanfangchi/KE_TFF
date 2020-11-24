@@ -22,6 +22,7 @@ from scipy.special import logsumexp as lse
 from pprint import pprint
 from code.data.data_distributor import DataDistributor
 from code.model.blackboard import Blackboard
+import csv
 
 logger = logging.getLogger()
 logging.basicConfig(stream=sys.stdout, level=logging.ERROR)
@@ -31,7 +32,7 @@ tf.compat.v1.disable_eager_execution()
 
 class Trainer(object):
 
-    def __init__(self, params, agent=None):
+    def __init__(self, params, agent=None, isTrainHandover=False):
 
         # transfer parameters to self
         for key, val in params.items(): setattr(self, key, val);
@@ -55,6 +56,8 @@ class Trainer(object):
 
         if agent is not None:
             self.output_dir = self.output_dir + '/' + agent
+            if isTrainHandover:
+                self.output_dir = self.output_dir + '/handover'
         else:
             self.output_dir = self.output_dir + '/test'
         self.model_dir = self.output_dir + '/' + 'model/'
@@ -327,16 +330,16 @@ class Trainer(object):
                                (num_ep_correct / self.batch_size),
                                train_loss))
 
-            if self.batch_counter%self.eval_every == 0:
-                with open(self.output_dir + '/scores.txt', 'a') as score_file:
-                    score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
-                os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
-                self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
-
-                self.test(sess, beam=True, print_paths=False)
+            # if self.batch_counter%self.eval_every == 0:
+            #     with open(self.output_dir + '/scores.txt', 'a') as score_file:
+            #         score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
+            #     os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
+            #     self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
+            #
+            #     self.test(sess, beam=True, print_paths=False)
 
             logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
-
+            self.save_path = self.model_saver.save(sess, self.model_dir + "model" + '.ckpt')
             gc.collect()
             if self.batch_counter >= self.total_iterations:
                 break
@@ -427,13 +430,13 @@ class Trainer(object):
                                        (num_ep_correct / self.batch_size),
                                        train_loss))
 
-                    with open(self.output_dir + '/scores.txt', 'a') as score_file:
-                        score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
-                    os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
-                    self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
+                    # with open(self.output_dir + '/scores.txt', 'a') as score_file:
+                    #     score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
+                    # os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
+                    # self.path_logger_file_ = self.path_logger_file + "/" + str(self.batch_counter) + "/paths"
 
-                    self.test(sess, beam=True, print_paths=False)
-
+                    #self.test(sess, beam=True, print_paths=False)
+                    self.save_path = self.model_saver.save(sess, self.model_dir + "model" + '.ckpt')
                     logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
                     gc.collect()
@@ -645,20 +648,28 @@ class Trainer(object):
                 for a in answers:
                     answer_file.write(a)
 
-        with open(self.output_dir + '/scores.txt', 'a') as score_file:
-            score_file.write("Hits@1: {0:7.4f}".format(all_final_reward_1))
-            score_file.write("\n")
-            score_file.write("Hits@3: {0:7.4f}".format(all_final_reward_3))
-            score_file.write("\n")
-            score_file.write("Hits@5: {0:7.4f}".format(all_final_reward_5))
-            score_file.write("\n")
-            score_file.write("Hits@10: {0:7.4f}".format(all_final_reward_10))
-            score_file.write("\n")
-            score_file.write("Hits@20: {0:7.4f}".format(all_final_reward_20))
-            score_file.write("\n")
-            score_file.write("auc: {0:7.4f}".format(auc))
-            score_file.write("\n")
-            score_file.write("\n")
+        score = {}
+        score["Hits@1"] = all_final_reward_1
+        score["Hits@3"] = all_final_reward_3
+        score["Hits@5"] = all_final_reward_5
+        score["Hits@10"] = all_final_reward_10
+        score["Hits@20"] = all_final_reward_20
+        score["auc"] = auc
+
+        # with open(self.output_dir + '/scores.txt', 'a') as score_file:
+        #     score_file.write("Hits@1: {0:7.4f}".format(all_final_reward_1))
+        #     score_file.write("\n")
+        #     score_file.write("Hits@3: {0:7.4f}".format(all_final_reward_3))
+        #     score_file.write("\n")
+        #     score_file.write("Hits@5: {0:7.4f}".format(all_final_reward_5))
+        #     score_file.write("\n")
+        #     score_file.write("Hits@10: {0:7.4f}".format(all_final_reward_10))
+        #     score_file.write("\n")
+        #     score_file.write("Hits@20: {0:7.4f}".format(all_final_reward_20))
+        #     score_file.write("\n")
+        #     score_file.write("auc: {0:7.4f}".format(auc))
+        #     score_file.write("\n")
+        #     score_file.write("\n")
 
         logger.info("Hits@1: {0:7.4f}".format(all_final_reward_1))
         logger.info("Hits@3: {0:7.4f}".format(all_final_reward_3))
@@ -666,6 +677,8 @@ class Trainer(object):
         logger.info("Hits@10: {0:7.4f}".format(all_final_reward_10))
         logger.info("Hits@20: {0:7.4f}".format(all_final_reward_20))
         logger.info("auc: {0:7.4f}".format(auc))
+
+        return score
 
     def top_k(self, scores, k):
         scores = scores.reshape(-1, k * self.max_num_actions)  # [B, (k*max_num_actions)]
@@ -691,28 +704,29 @@ def test_auc(options, save_path, path_logger_file, output_dir, data_input_dir=No
 
         trainer.test_rollouts = 100
 
-        #if not os.path.isdir(path_logger_file + "/" + "test_beam"):
-        os.mkdir(path_logger_file + "/" + "test_beam")
+        if not os.path.isdir(path_logger_file + "/" + "test_beam"):
+            os.mkdir(path_logger_file + "/" + "test_beam")
         trainer.path_logger_file_ = path_logger_file + "/" + "test_beam" + "/paths"
         with open(output_dir + '/scores.txt', 'a') as score_file:
             score_file.write("Test (beam) scores with best model from " + save_path + "\n")
         trainer.test_environment = trainer.test_test_environment
         trainer.test_environment.test_rollouts = 100
 
-        trainer.test(sess, beam=True, print_paths=True, save_model=False)
+        score = trainer.test(sess, beam=True, print_paths=True, save_model=False)
 
         if options['nell_evaluation'] == 1:
             nell_eval(path_logger_file + "/" + "test_beam/" + "pathsanswers",
                       data_input_dir + '/sort_test.pairs')
 
     tf.compat.v1.reset_default_graph()
-
+    return score
 
 if __name__ == '__main__':
     # read command line options
     options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
 
-    agent_names = ['agent_a', 'agent_b', 'agent_c']
+    #agent_names = ['agent_a', 'agent_b', 'agent_c']
+    agent_names = ['agent_a', 'agent_b']
 
     if not os.path.isfile(options['data_input_dir'] + '/' + 'graph_' + agent_names[0] + '.txt'):
         DataDistributor(options, agent_names)
@@ -746,75 +760,78 @@ if __name__ == '__main__':
     # Training
     # 不直接读取模型
     if not options['load_model']:
+        episode_handovers = {}
+        evaluation = {}
+        for i in range(len(agent_names)):
+            trainer = Trainer(options, agent_names[i])
 
-        #for i in range(len(agent_names)):
-        i = None
-        trainer = Trainer(options)
+            global_nn = GlobalMLP(options)
+            global_rnn = global_nn.initialize_global_rnn()
+            global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
 
-        global_nn = GlobalMLP(options)
-        global_rnn = global_nn.initialize_global_rnn()
-        global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+            with tf.compat.v1.Session(config=config) as sess:
+                # 初始化训练模型
+                if i == 0 or i is None:
+                    sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+                else:
+                    trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                                       sess=sess)
+                trainer.initialize_pretrained_embeddings(sess=sess)
 
-        with tf.compat.v1.Session(config=config) as sess:
-            # 初始化训练模型
-            if i == 0 or i is None:
-                sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
-            else:
-                trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
-                                   sess=sess)
-            trainer.initialize_pretrained_embeddings(sess=sess)
+                # 训练
+                episode_handover_for_agent = trainer.train(sess)
+                episode_handovers[agent_names[i]] = episode_handover_for_agent
+                save_path = trainer.save_path
+                path_logger_file = trainer.path_logger_file
+                output_dir = trainer.output_dir
 
-            # 训练
-            episode_handovers = trainer.train(sess)
-            save_path = trainer.save_path
-            path_logger_file = trainer.path_logger_file
-            output_dir = trainer.output_dir
+            tf.compat.v1.reset_default_graph()
 
-        tf.compat.v1.reset_default_graph()
+            score = test_auc(options, save_path, path_logger_file, output_dir)
+            evaluation[agent_names[i]] = score
 
-        test_auc(options, save_path, path_logger_file, output_dir)
+        for i in range(len(agent_names)):
+            for episode_handover in episode_handovers.keys():
+                if agent_names[i] == episode_handover:
+                    continue
 
-        # trainer = Trainer(options, agent_names[1])
-        #
-        # global_nn = GlobalMLP(options)
-        # global_rnn = global_nn.initialize_global_rnn()
-        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-        #
-        # with tf.compat.v1.Session(config=config) as sess:
-        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-        #     trainer.initialize_pretrained_embeddings(sess=sess)
-        #
-        #     trainer.train(sess)
-        #     save_path = trainer.save_path
-        #     path_logger_file = trainer.path_logger_file
-        #     output_dir = trainer.output_dir
-        #
-        # tf.compat.v1.reset_default_graph()
-        #
-        # test_auc(options, save_path, path_logger_file, output_dir)
-        #
-        # trainer = Trainer(options, agent_names[2])
-        #
-        # global_nn = GlobalMLP(options)
-        # global_rnn = global_nn.initialize_global_rnn()
-        # global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
-        #
-        # with tf.compat.v1.Session(config=config) as sess:
-        #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path, sess=sess)
-        #     trainer.initialize_pretrained_embeddings(sess=sess)
-        #
-        #     trainer.train(sess)
-        #     save_path = trainer.save_path
-        #     path_logger_file = trainer.path_logger_file
-        #     output_dir = trainer.output_dir
-        #
-        # tf.compat.v1.reset_default_graph()
+                trainer = Trainer(options, agent_names[i], isTrainHandover=True)
+
+                global_nn = GlobalMLP(options)
+                global_rnn = global_nn.initialize_global_rnn()
+                global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
+                with tf.compat.v1.Session(config=config) as sess:
+                    # 初始化训练模型
+
+                    trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                                           sess=sess)
+                    trainer.initialize_pretrained_embeddings(sess=sess)
+
+                    # 训练
+                    trainer.train_handover_episode(sess, episode_handovers[agent_names[i]])
+                    save_path = trainer.save_path
+                    path_logger_file = trainer.path_logger_file
+                    output_dir = trainer.output_dir
+
+                tf.compat.v1.reset_default_graph()
+
+                score = test_auc(options, save_path, path_logger_file, output_dir)
+                evaluation[agent_names[i] + " run " + episode_handover] = score
+
+        with open(options['output_dir'] + '/test/scores.csv', 'w') as evaluation_score:
+            writer = csv.writer(evaluation_score, delimiter=',')
+            writer.writerow(["item", "Hits@1", "Hits@3", "Hits@5", "Hits@10", "Hits@20", "auc"])
+            for i in evaluation:
+                row = []
+                row.append(i)
+                for v in evaluation[i].values():
+                    row.append(v)
+                writer.writerow(row)
 
     # 直接读取模型
     # Testing on test with best model
     else:
         logger.info("Skipping training")
         logger.info("Loading model from {}".format(options["model_load_dir"]))
-
-    #test_auc(options, save_path, path_logger_file, output_dir)
 
