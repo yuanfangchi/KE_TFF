@@ -34,10 +34,6 @@ class RelationEntityGrapher:
                 e2 = self.entity_vocab[line[2]]
                 self.store[e1].append((r, e2))
 
-            print("YF ====== Graph len ====== YF")
-            print(self.triple_store)
-            print(len(self.store))
-
         for e1 in self.store:
             num_actions = 1
             self.array_store[e1, 0, 1] = self.relation_vocab['NO_OP']

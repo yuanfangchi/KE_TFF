@@ -62,24 +62,6 @@ class Agent(object):
                                                        trainable=self.train_entities)
             self.entity_embedding_init = self.entity_lookup_table.assign(self.entity_embedding_placeholder)
 
-        with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE):
-            self.pretrained_loss_placeholder = tf.compat.v1.placeholder(tf.float32, [self.path_length, self.batch_size * self.num_rollouts], "pretrained_loss_placeholder")
-            self.pretrained_loss = tf.compat.v1.get_variable("pretrained_loss", shape=[self.path_length, self.batch_size * self.num_rollouts],
-                                                             dtype=tf.float32, initializer=tf.compat.v1.ones_initializer(),
-                                                             trainable=False)
-            self.pretrained_loss_init = self.pretrained_loss.assign(self.pretrained_loss_placeholder)
-
-            self.pretrained_logit_placeholder = tf.compat.v1.placeholder(tf.float32, [self.path_length,
-                                                                                     self.batch_size * self.num_rollouts, self.max_num_actions],
-                                                                        "pretrained_logit_placeholder")
-            self.pretrained_logit = tf.compat.v1.get_variable("pretrained_logit", shape=[self.path_length,
-                                                                                       self.batch_size * self.num_rollouts, self.max_num_actions],
-                                                             dtype=tf.float32,
-                                                             initializer=tf.compat.v1.ones_initializer(),
-                                                             trainable=False)
-            self.pretrained_logit_init = self.pretrained_logit.assign(self.pretrained_logit_placeholder)
-
-
     def get_mem_shape(self):
         return (self.LSTM_Layers, 2, None, self.m * self.hidden_size)
 
@@ -93,14 +75,29 @@ class Agent(object):
                 action_embedding = relation_embedding
         return action_embedding
 
+    def update_rnn_output(self, global_policy_rnn, handover_rnn_output, handover_rnn_state):
+        if type(handover_rnn_state) is tuple:
+            return handover_rnn_output, handover_rnn_state
+        else:
+            return handover_rnn_output, global_policy_rnn.zero_state(batch_size=self.batch_size * self.num_rollouts, dtype=tf.float32)
+
+    def update_mlp_output(self, handover_rnn_output):
+        return handover_rnn_output
+
+    @tf.function
     def step(self, next_relations, next_entities, prev_state, prev_relation, query_embedding, current_entities,
-             global_policy_rnn, global_hidden_layer, global_output_layer, label_action, range_arr, first_step_of_test):
+             global_policy_rnn, global_hidden_layer, global_output_layer, handover_rnn_output, handover_rnn_state, run_handover_step, label_action, range_arr, first_step_of_test):
 
         prev_action_embedding = self.action_encoder(prev_relation, current_entities)
 
         # 1. one step of rnn
         #output, new_state = self.policy_step(prev_action_embedding, prev_state)  # output: [B, 4D]
-        output, new_state = global_policy_rnn(prev_action_embedding, prev_state)  # output: [B, 4D]
+        #if tf.equal(run_handover_step, True):
+        #    output, new_state = self.update_rnn_output(global_policy_rnn, handover_rnn_output, handover_rnn_state)
+        #else:
+        output, new_state = global_policy_rnn(prev_action_embedding, prev_state)
+         # output: [B, 4D]
+
 
         # Get state vector
         prev_entity = tf.nn.embedding_lookup(params=self.entity_lookup_table, ids=current_entities)
@@ -108,11 +105,14 @@ class Agent(object):
             state = tf.concat([output, prev_entity], axis=-1)
         else:
             state = output
+
         candidate_action_embeddings = self.action_encoder(next_relations, next_entities)
         state_query_concat = tf.concat([state, query_embedding], axis=-1)
 
         # MLP for policy#
-
+        #if tf.equal(run_handover_step, True):
+        #    output = self.update_mlp_output(handover_rnn_output)
+        #else:
         hidden_layer_output = global_hidden_layer(state_query_concat)
         output = global_output_layer(hidden_layer_output)
 
@@ -137,12 +137,11 @@ class Agent(object):
         # 6. Map back to true id
         action_idx = tf.squeeze(action)
         chosen_relation = tf.gather_nd(next_relations, tf.transpose(a=tf.stack([range_arr, action_idx])))
-
-        return loss, new_state, tf.nn.log_softmax(scores), action_idx, chosen_relation
+        return loss, new_state, tf.nn.log_softmax(scores), output, action_idx, chosen_relation
 
     def __call__(self, candidate_relation_sequence, candidate_entity_sequence, current_entities, global_policy_rnn,
                  global_hidden_layer, global_output_layer,
-                 path_label, query_relation, range_arr, first_step_of_test, T=3, entity_sequence=0):
+                 path_label, query_relation, range_arr, first_step_of_test, handover_rnn_outputs, handover_rnn_states, run_handover_steps, T=3, entity_sequence=0):
         self.baseline_inputs = []
         # get the query vector
         query_embedding = tf.nn.embedding_lookup(params=self.relation_lookup_table, ids=query_relation)  # [B, 2D]
@@ -155,6 +154,7 @@ class Agent(object):
         action_idx = []
         rnn_state = []
         chosen_relations = []
+        rnn_output = []
 
         with tf.compat.v1.variable_scope("global_policy_steps_unroll", reuse=tf.compat.v1.AUTO_REUSE) as scope:
             for t in range(T):
@@ -163,16 +163,23 @@ class Agent(object):
                 next_possible_relations = candidate_relation_sequence[t]  # [B, MAX_NUM_ACTIONS, MAX_EDGE_LENGTH]
                 next_possible_entities = candidate_entity_sequence[t]
                 current_entities_t = current_entities[t]
+                handover_rnn_output = handover_rnn_outputs[t]
+                handover_rnn_state = handover_rnn_states[t]
+                run_handover_step = run_handover_steps[t]
 
                 path_label_t = path_label[t]  # [B]
 
-                loss, state, logits, idx, chosen_relation = self.step(next_possible_relations,
+                loss, state, logits, output, idx, chosen_relation = self.step(next_possible_relations,
                                                                               next_possible_entities,
-                                                                              state, prev_relation, query_embedding,
+                                                                              state, prev_relation,
+                                                                              query_embedding,
                                                                               current_entities_t,
                                                                               global_policy_rnn,
                                                                               global_hidden_layer,
                                                                               global_output_layer,
+                                                                              handover_rnn_output,
+                                                                              handover_rnn_state,
+                                                                              run_handover_step,
                                                                               label_action=path_label_t,
                                                                               range_arr=range_arr,
                                                                               first_step_of_test=first_step_of_test)
@@ -183,6 +190,7 @@ class Agent(object):
                 rnn_state.append(state)
                 prev_relation = chosen_relation
                 chosen_relations.append(chosen_relation)
+                rnn_output.append(output)
             # [(B, T), 4D]
 
-        return all_loss, all_logits, action_idx, rnn_state, chosen_relations
+        return all_loss, all_logits, action_idx, rnn_state, rnn_output, chosen_relations

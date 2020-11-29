@@ -32,16 +32,22 @@ class DataDistributor:
                         writer.writerow(triple_file[i])
                     triple_count_start_idx = triple_count_start_idx + triple_count_per_agent
 
-
     def split_batcher_triple(self, params, agent_names):
-        for agent in agent_names:
-            with open(params['data_input_dir'] + '/' + 'graph_' + agent + '.txt') as triple_file_raw:
-                triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
-                batcher_idx = np.random.randint(len(triple_file), size=(1, 10))
+        with open(params['data_input_dir'] + '/' + 'train.txt') as triple_file_raw:
+            triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
+
+            triple_count_start_idx = 0
+            triple_count_per_agent = int(len(triple_file) / len(agent_names))
+
+            print('Triple count per Agent')
+            print(triple_count_per_agent)
+
+            for agent in agent_names:
                 with open(params['data_input_dir'] + '/' + 'train_' + agent + '.txt', 'w') as triple_file_name:
                     writer = csv.writer(triple_file_name, delimiter='\t')
-                    for i in range(0, len(batcher_idx[0])):
-                        writer.writerow(triple_file[batcher_idx[0][i]])
+                    for i in range(triple_count_start_idx, triple_count_start_idx + triple_count_per_agent):
+                        writer.writerow(triple_file[i])
+                    triple_count_start_idx = triple_count_start_idx + triple_count_per_agent
 
         with open(params['data_input_dir'] + '/' + 'dev.txt') as triple_file_raw:
             dev_triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
@@ -54,6 +60,29 @@ class DataDistributor:
                     for i in range(dev_triple_count_start_idx, dev_triple_count_start_idx + dev_triple_count_per_agent):
                         writer.writerow(dev_triple_file[i])
                     dev_triple_count_start_idx = dev_triple_count_start_idx + dev_triple_count_per_agent
+
+
+    # def split_batcher_triple(self, params, agent_names):
+    #     for agent in agent_names:
+    #         with open(params['data_input_dir'] + '/' + 'graph_' + agent + '.txt') as triple_file_raw:
+    #             triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
+    #             batcher_idx = np.random.randint(len(triple_file), size=(1, 10))
+    #             with open(params['data_input_dir'] + '/' + 'train_' + agent + '.txt', 'w') as triple_file_name:
+    #                 writer = csv.writer(triple_file_name, delimiter='\t')
+    #                 for i in range(0, len(batcher_idx[0])):
+    #                     writer.writerow(triple_file[batcher_idx[0][i]])
+    #
+    #     with open(params['data_input_dir'] + '/' + 'dev.txt') as triple_file_raw:
+    #         dev_triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
+    #
+    #         dev_triple_count_start_idx = 0
+    #         dev_triple_count_per_agent = int(len(dev_triple_file) / len(agent_names))
+    #         for agent in agent_names:
+    #             with open(params['data_input_dir'] + '/' + 'dev_' + agent + '.txt', 'w') as triple_file_name:
+    #                 writer = csv.writer(triple_file_name, delimiter='\t')
+    #                 for i in range(dev_triple_count_start_idx, dev_triple_count_start_idx + dev_triple_count_per_agent):
+    #                     writer.writerow(dev_triple_file[i])
+    #                 dev_triple_count_start_idx = dev_triple_count_start_idx + dev_triple_count_per_agent
 
 
     def create_vocab(self, params, agent_names):
