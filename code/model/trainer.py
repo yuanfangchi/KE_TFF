@@ -277,6 +277,13 @@ class Trainer(object):
 
         return fetches, feeds, feed_dict
 
+    def update_valid_loss_idx(self, next_entities):
+        valid_loss_idx = next_entities[:, 0]
+        condlist = [valid_loss_idx > 0]
+        choicelist = [valid_loss_idx - valid_loss_idx + 1]
+        valid_loss_idx = np.select(condlist, choicelist)
+
+        return valid_loss_idx
 
     def train(self, sess):
         # import pdb
@@ -294,10 +301,7 @@ class Trainer(object):
 
             # get initial state
             state = episode.get_state()
-            valid_loss_idx = state['next_entities'][:,0]
-            condlist = [valid_loss_idx > 0]
-            choicelist = [valid_loss_idx - valid_loss_idx + 1]
-            valid_loss_idx = np.select(condlist, choicelist)
+            valid_loss_idx = self.update_valid_loss_idx(state['next_entities'])
 
             # for each time step
             loss_before_regularization = []
@@ -434,10 +438,7 @@ class Trainer(object):
                     reconstruct_state_map[i] = episode_handover_state
                     new_state = episode.return_next_actions(np.array(episode_handover_state['handover_entities']),
                                                             episode_handover_state['handover_idx'])
-                    valid_loss_idx = new_state['next_entities'][:, 0]
-                    condlist = [valid_loss_idx > 0]
-                    choicelist = [valid_loss_idx - valid_loss_idx + 1]
-                    valid_loss_idx = np.select(condlist, choicelist)
+                    valid_loss_idx = self.update_valid_loss_idx(new_state['next_entities'])
 
                     if path_idx_offset:
                         reconstruct_path_idx = reconstruct_path_idx + 1
@@ -544,10 +545,7 @@ class Trainer(object):
                             self.chosen_relations[path_idx]], feed_dict=feed_dict[path_idx])
 
                 new_state = episode.return_next_actions(np.array(episode_handover_state['current_entities']), i)
-                valid_loss_idx = new_state['next_entities'][:, 0]
-                condlist = [valid_loss_idx > 0]
-                choicelist = [valid_loss_idx - valid_loss_idx + 1]
-                valid_loss_idx = np.select(condlist, choicelist)
+                valid_loss_idx = self.update_valid_loss_idx(new_state['next_entities'])
 
                 for j in range(i, self.path_length):
                     feed_dict[j][self.candidate_relation_sequence[j]] = new_state['next_relations']
@@ -907,8 +905,10 @@ if __name__ == '__main__':
     agent_names = ['agent_a', 'agent_b', 'agent_c']
     #agent_names = ['agent_a', 'agent_b']
 
+    data_splitter = DataDistributor()
+
     if not os.path.isfile(options['data_input_dir'] + '/' + 'graph_' + agent_names[0] + '.txt'):
-        DataDistributor(options, agent_names)
+        data_splitter.split(options, agent_names)
 
     # Set logging
     logger.setLevel(logging.INFO)
@@ -969,11 +969,15 @@ if __name__ == '__main__':
             score = test_auc(options, save_path, path_logger_file, output_dir)
             evaluation[agent_names[i]] = score
 
-            for j in range(len(agent_names)):
-                if agent_names[j] == agent_names[i]:
+        # for j in range(len(agent_names)):
+        #     if agent_names[j] == agent_names[i]:
+        #         continue
+        for i in range(len(agent_names)):
+            for episode_handover in episode_handovers.keys():
+                if agent_names[i] == episode_handover:
                     continue
 
-                trainer = Trainer(options, agent_names[j], isTrainHandover=True)
+                trainer = Trainer(options, agent_names[i], isTrainHandover=True)
 
                 global_nn = GlobalMLP(options)
                 global_rnn = global_nn.initialize_global_rnn()
@@ -996,14 +1000,19 @@ if __name__ == '__main__':
                 tf.compat.v1.reset_default_graph()
                 if save_path:
                     score = test_auc(options, save_path, path_logger_file, output_dir)
-                    evaluation[agent_names[j] + " run " + agent_names[i]] = score
+                    evaluation[agent_names[i] + " run " + episode_handover + " data"] = score
 
         with open(options['output_dir'] + '/test/scores.csv', 'w') as evaluation_score:
             writer = csv.writer(evaluation_score, delimiter=',')
-            writer.writerow(["item", "Hits@1", "Hits@3", "Hits@5", "Hits@10", "Hits@20", "auc"])
+            writer.writerow(["item", "triple_count", "Hits@1", "Hits@3", "Hits@5", "Hits@10", "Hits@20", "auc"])
             for i in evaluation:
                 row = []
                 row.append(i)
+                grapher_triple_per_count = data_splitter.get_grapher_triple_per_count()
+                if i in grapher_triple_per_count.keys():
+                    row.append(grapher_triple_per_count[i])
+                else:
+                    row.append("")
                 for v in evaluation[i].values():
                     row.append(v)
                 writer.writerow(row)

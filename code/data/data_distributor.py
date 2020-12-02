@@ -4,16 +4,22 @@ import numpy as np
 import csv
 import json
 import os
+import random
 
 logger = logging.getLogger(__name__)
 
 
 class DataDistributor:
-    def __init__(self, params, agent_names):
-        self.split_grapher_triple(params, agent_names)
-        self.split_batcher_triple(params, agent_names)
-        #self.create_vocab(params, agent_names)
+    def __init__(self):
+        self.triple_per_agent = {}
 
+    def split(self, params, agent_names):
+        self.split_grapher_triple_random(params, agent_names)
+        self.split_batcher_triple(params, agent_names)
+        # self.create_vocab(params, agent_names)
+
+    def get_grapher_triple_per_count(self):
+        return self.triple_per_agent
 
     def split_grapher_triple(self, params, agent_names):
         with open(params['data_input_dir'] + '/' + 'graph.txt') as triple_file_raw:
@@ -22,9 +28,6 @@ class DataDistributor:
             triple_count_start_idx = 0
             triple_count_per_agent = int(len(triple_file) / len(agent_names))
 
-            print('Triple count per Agent')
-            print(triple_count_per_agent)
-
             for agent in agent_names:
                 with open(params['data_input_dir'] + '/' + 'graph_' + agent + '.txt', 'w') as triple_file_name:
                     writer = csv.writer(triple_file_name, delimiter='\t')
@@ -32,15 +35,27 @@ class DataDistributor:
                         writer.writerow(triple_file[i])
                     triple_count_start_idx = triple_count_start_idx + triple_count_per_agent
 
+    def split_grapher_triple_random(self, params, agent_names):
+        with open(params['data_input_dir'] + '/' + 'graph.txt') as triple_file_raw:
+            triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
+
+            self.triple_per_agent = {}
+            for agent in agent_names:
+                triple_count_per_agent = random.randint(1, len(triple_file) -1)
+
+                self.triple_per_agent[agent] = triple_count_per_agent
+                with open(params['data_input_dir'] + '/' + 'graph_' + agent + '.txt', 'w') as triple_file_name:
+                    writer = csv.writer(triple_file_name, delimiter='\t')
+                    for i in range(triple_count_per_agent):
+                        idx = random.randint(1, len(triple_file) - 1)
+                        writer.writerow(triple_file[idx])
+
     def split_batcher_triple(self, params, agent_names):
         with open(params['data_input_dir'] + '/' + 'train.txt') as triple_file_raw:
             triple_file = list(csv.reader(triple_file_raw, delimiter='\t'))
 
             triple_count_start_idx = 0
             triple_count_per_agent = int(len(triple_file) / len(agent_names))
-
-            print('Triple count per Agent')
-            print(triple_count_per_agent)
 
             for agent in agent_names:
                 with open(params['data_input_dir'] + '/' + 'train_' + agent + '.txt', 'w') as triple_file_name:
