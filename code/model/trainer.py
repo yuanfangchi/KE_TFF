@@ -293,6 +293,8 @@ class Trainer(object):
         train_loss = 0.0
         start_time = time.time()
         self.batch_counter = 0
+        batch_loss = {}
+        memory_use = {}
         episode_handovers = defaultdict(list)
         for episode in self.train_environment.get_episodes():
             self.batch_counter += 1
@@ -379,7 +381,9 @@ class Trainer(object):
                                (num_ep_correct / self.batch_size),
                                train_loss))
 
-            # if self.batch_counter%self.eval_every == 0:
+            if self.batch_counter%self.eval_every == 0:
+                batch_loss[self.batch_counter] = train_loss
+                memory_use[self.batch_counter] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
             #     with open(self.output_dir + '/scores.txt', 'a') as score_file:
             #         score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
             #     os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
@@ -393,7 +397,7 @@ class Trainer(object):
             if self.batch_counter >= self.total_iterations:
                 break
 
-        return episode_handovers
+        return episode_handovers, batch_loss, memory_use
 
     def train_noop_episode(self, sess, episode_handovers):
         fetches, feeds, feed_dict = self.gpu_io_setup()
@@ -510,6 +514,8 @@ class Trainer(object):
         start_time = time.time()
 
         self.batch_counter = 0
+        batch_loss = {}
+        memory_use = {}
         for episode_handover in episode_handovers:
             reconstruct_state_map = {}
             for i, episode_handover_state in episode_handovers[episode_handover]:
@@ -601,6 +607,9 @@ class Trainer(object):
                                    (num_ep_correct / self.batch_size),
                                    train_loss))
 
+                if self.batch_counter % self.eval_every == 0:
+                    batch_loss[self.batch_counter] = train_loss
+                    memory_use[self.batch_counter] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
                 # with open(self.output_dir + '/scores.txt', 'a') as score_file:
                 #     score_file.write("Score for iteration " + str(self.batch_counter) + "\n")
                 # os.mkdir(self.path_logger_file + "/" + str(self.batch_counter))
@@ -611,6 +620,7 @@ class Trainer(object):
                 logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
                 gc.collect()
+        return batch_loss, memory_use
 
     def test(self, sess, beam=False, print_paths=False, save_model = True, auc = False):
         batch_counter = 0
@@ -900,7 +910,7 @@ def test_auc(options, save_path, path_logger_file, output_dir, data_input_dir=No
 
 if __name__ == '__main__':
     # read command line options
-    options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
+    options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time())))
 
     if options['distributed_training']:
         agent_names = ['agent_1', 'agent_2', 'agent_3', 'agent_4', 'agent_5', 'agent_6', 'agent_7', 'agent_8',
@@ -942,6 +952,8 @@ if __name__ == '__main__':
     if not options['load_model']:
         episode_handovers = {}
         evaluation = {}
+        batch_loss = {}
+        memory_use = {}
         for i in range(len(agent_names)):
             trainer = Trainer(options, agent_names[i])
 
@@ -962,7 +974,7 @@ if __name__ == '__main__':
                 trainer.initialize_pretrained_embeddings(sess=sess)
 
                 # 训练
-                episode_handover_for_agent = trainer.train(sess)
+                episode_handover_for_agent, batch_loss_for_agent, memory_use_for_agent = trainer.train(sess)
                 episode_handovers[agent_names[i]] = episode_handover_for_agent
                 save_path = trainer.save_path
                 path_logger_file = trainer.path_logger_file
@@ -972,6 +984,8 @@ if __name__ == '__main__':
 
             score = test_auc(options, save_path, path_logger_file, output_dir)
             evaluation[agent_names[i]] = score
+            batch_loss[agent_names[i]] = batch_loss_for_agent
+            memory_use[agent_names[i]] = memory_use_for_agent
 
         for i in range(len(agent_names)):
             trainer = Trainer(options, agent_names[i])
@@ -993,7 +1007,7 @@ if __name__ == '__main__':
                 trainer.initialize_pretrained_embeddings(sess=sess)
 
                 # 训练
-                episode_handover_for_agent = trainer.train(sess)
+                episode_handover_for_agent, batch_loss_for_agent, memory_use_for_agent = trainer.train(sess)
                 episode_handovers[agent_names[i]] = episode_handover_for_agent
                 save_path = trainer.save_path
                 path_logger_file = trainer.path_logger_file
@@ -1003,6 +1017,8 @@ if __name__ == '__main__':
 
             score = test_auc(options, save_path, path_logger_file, output_dir)
             evaluation[agent_names[i] + " with transfer"] = score
+            batch_loss[agent_names[i] + " with transfer"] = batch_loss_for_agent
+            memory_use[agent_names[i] + " with transfer"] = memory_use_for_agent
 
         for i in range(len(agent_names)):
             for episode_handover in episode_handovers.keys():
@@ -1023,7 +1039,7 @@ if __name__ == '__main__':
                     trainer.initialize_pretrained_embeddings(sess=sess)
 
                     # 训练
-                    trainer.train_full_episode(sess, episode_handovers[agent_names[i]])
+                    batch_loss_for_agent, memory_use_for_agent = trainer.train_full_episode(sess, episode_handovers[agent_names[i]])
 
                     save_path = trainer.save_path
                     path_logger_file = trainer.path_logger_file
@@ -1033,6 +1049,8 @@ if __name__ == '__main__':
                 if save_path:
                     score = test_auc(options, save_path, path_logger_file, output_dir)
                     evaluation[agent_names[i] + " run " + episode_handover + " data"] = score
+                    batch_loss[agent_names[i] + " run " + episode_handover + " data"] = batch_loss_for_agent
+                    memory_use[agent_names[i] + " run " + episode_handover + " data"] = memory_use_for_agent
 
         with open(options['output_dir'] + '/test/scores.csv', 'w') as evaluation_score:
             writer = csv.writer(evaluation_score, delimiter=',')
@@ -1048,6 +1066,26 @@ if __name__ == '__main__':
                 for v in evaluation[i].values():
                     row.append(v)
                 writer.writerow(row)
+        with open(options['output_dir'] + '/test/batch_loss.csv', 'w') as batch_loss_writer:
+            writer = csv.writer(batch_loss_writer, delimiter=',')
+            writer.writerow(["item", "batch_count", "loss"])
+            for i in batch_loss:
+                for j in batch_loss[i]:
+                    row = []
+                    row.append(i)
+                    row.append(j)
+                    row.append(batch_loss[i][j])
+                    writer.writerow(row)
+        with open(options['output_dir'] + '/test/memory_use.csv', 'w') as memory_use_writer:
+            writer = csv.writer(memory_use_writer, delimiter=',')
+            writer.writerow(["item", "batch_count", "memory_use"])
+            for i in memory_use:
+                for j in memory_use[i]:
+                    row = []
+                    row.append(i)
+                    row.append(j)
+                    row.append(memory_use[i][j])
+                    writer.writerow(row)
 
     # 直接读取模型
     # Testing on test with best model
