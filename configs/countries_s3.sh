@@ -16,3 +16,6 @@ base_output_dir="output/countries_s3/"
 model_load_dir="nothing"
 load_model=0
 nell_evaluation=0
+distributed_training=0
+split_random=0
+transferred_training=0

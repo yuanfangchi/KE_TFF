@@ -902,13 +902,14 @@ if __name__ == '__main__':
     # read command line options
     options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time())))
 
-    agent_names = ['agent_a', 'agent_b', 'agent_c']
-    #agent_names = ['agent_a', 'agent_b']
+    if options['distributed_training']:
+        agent_names = ['agent_1', 'agent_2', 'agent_3', 'agent_4', 'agent_5', 'agent_6', 'agent_7', 'agent_8',
+                       'agent_9','agent_10', 'agent_11', 'agent_12']
+    else:
+        agent_names = ['agent_full']
 
     data_splitter = DataDistributor()
-
-    if not os.path.isfile(options['data_input_dir'] + '/' + 'graph_' + agent_names[0] + '.txt'):
-        data_splitter.split(options, agent_names)
+    data_splitter.split(options, agent_names)
 
     # Set logging
     logger.setLevel(logging.INFO)
@@ -950,11 +951,14 @@ if __name__ == '__main__':
 
             with tf.compat.v1.Session(config=config) as sess:
                 # 初始化训练模型
-                if i == 0 or i is None:
+                if i == 0:
                     sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
                 else:
-                    trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
-                                       sess=sess)
+                    # if options['transferred_training']:
+                    #     trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                    #                    sess=sess)
+                    # else:
+                    sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
                 trainer.initialize_pretrained_embeddings(sess=sess)
 
                 # 训练
@@ -969,9 +973,37 @@ if __name__ == '__main__':
             score = test_auc(options, save_path, path_logger_file, output_dir)
             evaluation[agent_names[i]] = score
 
-        # for j in range(len(agent_names)):
-        #     if agent_names[j] == agent_names[i]:
-        #         continue
+        for i in range(len(agent_names)):
+            trainer = Trainer(options, agent_names[i])
+
+            global_nn = GlobalMLP(options)
+            global_rnn = global_nn.initialize_global_rnn()
+            global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+
+            with tf.compat.v1.Session(config=config) as sess:
+                # 初始化训练模型
+                if i == 0:
+                    sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+                else:
+                    # if options['transferred_training']:
+                    trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                                       sess=sess)
+                    # else:
+                    #     sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+                trainer.initialize_pretrained_embeddings(sess=sess)
+
+                # 训练
+                episode_handover_for_agent = trainer.train(sess)
+                episode_handovers[agent_names[i]] = episode_handover_for_agent
+                save_path = trainer.save_path
+                path_logger_file = trainer.path_logger_file
+                output_dir = trainer.output_dir
+
+            tf.compat.v1.reset_default_graph()
+
+            score = test_auc(options, save_path, path_logger_file, output_dir)
+            evaluation[agent_names[i] + " with transfer"] = score
+
         for i in range(len(agent_names)):
             for episode_handover in episode_handovers.keys():
                 if agent_names[i] == episode_handover:

@@ -12,7 +12,7 @@ def read_options(test_name):
     parser.add_argument("--input_file", default="train.txt", type=str)
     parser.add_argument("--create_vocab", default=0, type=int)
     parser.add_argument("--vocab_dir", default="", type=str)
-    parser.add_argument("--max_num_actions", default=200, type=int)
+    parser.add_argument("--max_num_actions", default=70, type=int)
     parser.add_argument("--path_length", default=3, type=int)
     parser.add_argument("--hidden_size", default=50, type=int)
     parser.add_argument("--embedding_size", default=50, type=int)
@@ -43,6 +43,9 @@ def read_options(test_name):
     parser.add_argument("--model_load_dir", default="", type=str)
     parser.add_argument("--load_model", default=0, type=int)
     parser.add_argument("--nell_evaluation", default=0, type=int)
+    parser.add_argument("--distributed_training", default=0, type=int)
+    parser.add_argument("--split_random", default=0, type=int)
+    parser.add_argument("--transferred_training", default=0, type=int)
     # parser.add_argument("--nell_query", default='all', type=str)
 
     try:
