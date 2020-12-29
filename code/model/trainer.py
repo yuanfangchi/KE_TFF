@@ -913,8 +913,9 @@ if __name__ == '__main__':
     options = read_options("test_multi_agent_" + time.strftime("%Y-%m-%d-%H-%M-%S", time.localtime(time.time())))
 
     if options['distributed_training']:
-        agent_names = ['agent_1', 'agent_2', 'agent_3', 'agent_4', 'agent_5', 'agent_6', 'agent_7', 'agent_8',
-                       'agent_9','agent_10', 'agent_11', 'agent_12']
+        #agent_names = ['agent_1', 'agent_2', 'agent_3', 'agent_4', 'agent_5', 'agent_6', 'agent_7', 'agent_8',
+        #               'agent_9','agent_10', 'agent_11', 'agent_12']
+        agent_names = ['agent_1', 'agent_2', 'agent_3']
     else:
         agent_names = ['agent_full']
 
@@ -1039,7 +1040,7 @@ if __name__ == '__main__':
                     trainer.initialize_pretrained_embeddings(sess=sess)
 
                     # 训练
-                    batch_loss_for_agent, memory_use_for_agent = trainer.train_full_episode(sess, episode_handovers[agent_names[i]])
+                    batch_loss_for_agent, memory_use_for_agent = trainer.train_full_episode(sess, episode_handovers[episode_handover])
 
                     save_path = trainer.save_path
                     path_logger_file = trainer.path_logger_file
