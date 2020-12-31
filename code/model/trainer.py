@@ -406,6 +406,8 @@ class Trainer(object):
         start_time = time.time()
 
         self.batch_counter = 0
+        batch_loss = {}
+        memory_use = {}
         for episode_handover in episode_handovers:
             reconstruct_state_map = {}
             for i, episode_handover_state in episode_handovers[episode_handover]:
@@ -502,10 +504,15 @@ class Trainer(object):
                                        (num_ep_correct / self.batch_size),
                                        train_loss))
 
+                    if self.batch_counter % self.eval_every == 0:
+                        batch_loss[self.batch_counter] = train_loss
+                        memory_use[self.batch_counter] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+
                     self.save_path = self.model_saver.save(sess, self.model_dir + "model" + '.ckpt')
                     logger.info('Memory usage: %s (kb)' % resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
 
                     gc.collect()
+        return batch_loss, memory_use
 
     def train_full_episode(self, sess, episode_handovers):
         fetches, feeds, feed_dict = self.gpu_io_setup()
@@ -988,38 +995,39 @@ if __name__ == '__main__':
             batch_loss[agent_names[i]] = batch_loss_for_agent
             memory_use[agent_names[i]] = memory_use_for_agent
 
-        for i in range(len(agent_names)):
-            trainer = Trainer(options, agent_names[i])
+        if options['transferred_training']:
+            for i in range(len(agent_names)):
+                trainer = Trainer(options, agent_names[i])
 
-            global_nn = GlobalMLP(options)
-            global_rnn = global_nn.initialize_global_rnn()
-            global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
+                global_nn = GlobalMLP(options)
+                global_rnn = global_nn.initialize_global_rnn()
+                global_hidden_layer, global_output_layer = global_nn.initialize_global_mlp()
 
-            with tf.compat.v1.Session(config=config) as sess:
-                # 初始化训练模型
-                if i == 0:
-                    sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
-                else:
-                    # if options['transferred_training']:
-                    trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
-                                       sess=sess)
-                    # else:
-                    #     sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
-                trainer.initialize_pretrained_embeddings(sess=sess)
+                with tf.compat.v1.Session(config=config) as sess:
+                    # 初始化训练模型
+                    if i == 0:
+                        sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+                    else:
+                        # if options['transferred_training']:
+                        trainer.initialize(global_rnn, global_hidden_layer, global_output_layer, restore=save_path,
+                                           sess=sess)
+                        # else:
+                        #     sess.run(trainer.initialize(global_rnn, global_hidden_layer, global_output_layer))
+                    trainer.initialize_pretrained_embeddings(sess=sess)
 
-                # 训练
-                episode_handover_for_agent, batch_loss_for_agent, memory_use_for_agent = trainer.train(sess)
-                episode_handovers[agent_names[i]] = episode_handover_for_agent
-                save_path = trainer.save_path
-                path_logger_file = trainer.path_logger_file
-                output_dir = trainer.output_dir
+                    # 训练
+                    episode_handover_for_agent, batch_loss_for_agent, memory_use_for_agent = trainer.train(sess)
+                    episode_handovers[agent_names[i]] = episode_handover_for_agent
+                    save_path = trainer.save_path
+                    path_logger_file = trainer.path_logger_file
+                    output_dir = trainer.output_dir
 
-            tf.compat.v1.reset_default_graph()
+                tf.compat.v1.reset_default_graph()
 
-            score = test_auc(options, save_path, path_logger_file, output_dir)
-            evaluation[agent_names[i] + " with transfer"] = score
-            batch_loss[agent_names[i] + " with transfer"] = batch_loss_for_agent
-            memory_use[agent_names[i] + " with transfer"] = memory_use_for_agent
+                score = test_auc(options, save_path, path_logger_file, output_dir)
+                evaluation[agent_names[i] + " with transfer"] = score
+                batch_loss[agent_names[i] + " with transfer"] = batch_loss_for_agent
+                memory_use[agent_names[i] + " with transfer"] = memory_use_for_agent
 
         for i in range(len(agent_names)):
             for episode_handover in episode_handovers.keys():
