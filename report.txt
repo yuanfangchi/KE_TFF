@@ -1,0 +1,171 @@
+TensorFlow 2.0 Upgrade Script
+-----------------------------
+Converted 16 files
+Detected 6 issues that require attention
+--------------------------------------------------------------------------------
+--------------------------------------------------------------------------------
+File: code/model/agent.py
+--------------------------------------------------------------------------------
+code/model/agent.py:80:33: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+code/model/agent.py:81:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+code/model/agent.py:97:22: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+code/model/agent.py:137:26: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+--------------------------------------------------------------------------------
+File: code/model/trainer.py
+--------------------------------------------------------------------------------
+code/model/trainer.py:120:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+code/model/trainer.py:476:33: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+================================================================================
+Detailed log follows:
+
+================================================================================
+================================================================================
+Input tree: 'code/'
+================================================================================
+--------------------------------------------------------------------------------
+Processing file 'code/options.py'
+ outputting to 'code2/options.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/__init__.py'
+ outputting to 'code2/__init__.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/baseline.py'
+ outputting to 'code2/model/baseline.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/tff_test_agent.py'
+ outputting to 'code2/model/tff_test_agent.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/__init__.py'
+ outputting to 'code2/model/__init__.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/tff_test_trainer.py'
+ outputting to 'code2/model/tff_test_trainer.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/nell_eval.py'
+ outputting to 'code2/model/nell_eval.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/agent.py'
+ outputting to 'code2/model/agent.py'
+--------------------------------------------------------------------------------
+
+80:33: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+81:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+97:22: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+137:26: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/environment.py'
+ outputting to 'code2/model/environment.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/trainer.py'
+ outputting to 'code2/model/trainer.py'
+--------------------------------------------------------------------------------
+
+120:31: WARNING: tf.nn.embedding_lookup requires manual check. `partition_strategy` has been removed from tf.nn.embedding_lookup.  The 'div' strategy will be used by default.
+476:33: WARNING: *.save requires manual check. (This warning is only applicable if the code saves a tf.Keras model) Keras model.save now saves to the Tensorflow SavedModel format by default, instead of HDF5. To continue saving to HDF5, add the argument save_format='h5' to the save() function.
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/model/tff_test.py'
+ outputting to 'code2/model/tff_test.py'
+--------------------------------------------------------------------------------
+
+52:10: INFO: Added keywords to args of function 'tf.reduce_mean'
+53:6: INFO: Added keywords to args of function 'tf.reduce_sum'
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/data/feed_data.py'
+ outputting to 'code2/data/feed_data.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/data/__init__.py'
+ outputting to 'code2/data/__init__.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/data/grapher.py'
+ outputting to 'code2/data/grapher.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/data/preprocessing_scripts/create_vocab.py'
+ outputting to 'code2/data/preprocessing_scripts/create_vocab.py'
+--------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------
+Processing file 'code/data/preprocessing_scripts/nell.py'
+ outputting to 'code2/data/preprocessing_scripts/nell.py'
+--------------------------------------------------------------------------------
+
+ERROR: Failed to parse.
+Traceback (most recent call last):
+  File "/Users/YuanfangChi/IdeaProjects/KE_TFF/venv/lib/python3.7/site-packages/tensorflow/tools/compatibility/ast_edits.py", line 940, in update_string_pasta
+    t = pasta.parse(text)
+  File "/Users/YuanfangChi/IdeaProjects/KE_TFF/venv/lib/python3.7/site-packages/pasta/__init__.py", line 23, in parse
+    t = ast_utils.parse(src)
+  File "/Users/YuanfangChi/IdeaProjects/KE_TFF/venv/lib/python3.7/site-packages/pasta/base/ast_utils.py", line 56, in parse
+    tree = ast.parse(sanitize_source(src))
+  File "/usr/local/opt/python/Frameworks/Python.framework/Versions/3.7/lib/python3.7/ast.py", line 35, in parse
+    return compile(source, filename, mode, PyCF_ONLY_AST)
+  File "<unknown>", line 92
+    print "here"
+               ^
+SyntaxError: Missing parentheses in call to 'print'. Did you mean print("here")?
+
+--------------------------------------------------------------------------------
+
