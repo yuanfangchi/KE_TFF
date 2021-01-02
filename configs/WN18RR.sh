@@ -17,5 +17,5 @@ load_model=0
 model_load_dir="/home/sdhuliawala/logs/RL-Path-RNN/wn18rrr/edb6_3_0.05_10_0.05/model/model.ckpt"
 nell_evaluation=0
 distributed_training=1
-split_random=1
-transferred_training=0
+split_random=0
+transferred_training=1
