@@ -46,6 +46,7 @@ def read_options(test_name):
     parser.add_argument("--distributed_training", default=0, type=int)
     parser.add_argument("--split_random", default=0, type=int)
     parser.add_argument("--transferred_training", default=0, type=int)
+    parser.add_argument("--abs_relationship", default=0, type=int)
     # parser.add_argument("--nell_query", default='all', type=str)
 
     try:

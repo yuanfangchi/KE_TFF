@@ -915,12 +915,12 @@ if __name__ == '__main__':
     if options['distributed_training']:
         #agent_names = ['agent_1', 'agent_2', 'agent_3', 'agent_4', 'agent_5', 'agent_6', 'agent_7', 'agent_8',
         #               'agent_9','agent_10', 'agent_11', 'agent_12']
-        agent_names = ['agent_1', 'agent_2', 'agent_3']
+        agent_names = ['agent_1', 'agent_2']
     else:
         agent_names = ['agent_full']
 
     data_splitter = DataDistributor()
-    data_splitter.split(options, agent_names)
+    # data_splitter.split(options, agent_names)
 
     # Set logging
     logger.setLevel(logging.INFO)
