@@ -78,9 +78,7 @@ class DataDistributor:
             self.triple_per_agent = {}
             self.agent_entity_vocab = {}
             self.agent_relation_vocab = {}
-
             agent_triple_spilt_param = {}
-
             agent_triple_spilt_param[agent_names[0]] = 0.10
             agent_triple_spilt_param[agent_names[1]] = 0.30
             agent_triple_spilt_param[agent_names[2]] = 0.70

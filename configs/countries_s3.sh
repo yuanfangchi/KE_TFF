@@ -2,11 +2,13 @@
 
 data_input_dir="datasets/data_preprocessed/countries_S3/"
 vocab_dir="datasets/data_preprocessed/countries_S3/vocab"
+
 total_iterations=100
 path_length=3
 hidden_size=2
 embedding_size=2
 batch_size=100
+
 beta=0.1
 Lambda=0.02
 use_entity_embeddings=0
@@ -20,3 +22,4 @@ distributed_training=0
 split_random=0
 transferred_training=0
 abs_relationship=0
+
